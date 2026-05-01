@@ -5,6 +5,7 @@
 // but persists everything through Supabase and syncs live across teammates.
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { LogoSvg } from "@/components/LogoSvg";
 
@@ -338,6 +339,12 @@ export function Organizer({ initialItems, initialMembers, currentUser }: Props) 
             </span>
           </div>
           <div className="flex items-center gap-2 text-sm">
+            <Link
+              href="/scents"
+              className="px-3 py-2 rounded-lg border border-border hover:bg-gray-50"
+            >
+              Scent Scheduler
+            </Link>
             <button
               onClick={() => setShowMembers(true)}
               className="px-3 py-2 rounded-lg border border-border hover:bg-gray-50"

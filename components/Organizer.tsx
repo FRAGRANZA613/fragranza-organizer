@@ -44,6 +44,7 @@ export interface Invoice {
   notes: string | null;
   paid: boolean;
   paid_at: string | null;
+  assigned_to: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -136,6 +137,7 @@ export function Organizer({
   const [iDue, setIDue] = useState("");
   const [iContact, setIContact] = useState("");
   const [iNotes, setINotes] = useState("");
+  const [iAssignee, setIAssignee] = useState<string>(currentUser.id);
   const [savingInvoice, setSavingInvoice] = useState(false);
   const [filterType, setFilterType] = useState<"all" | ItemType>("all");
   const [filterPriority, setFilterPriority] = useState<"all" | Priority>("all");
@@ -343,6 +345,7 @@ export function Organizer({
     setIDue("");
     setIContact("");
     setINotes("");
+    setIAssignee(currentUser.id);
   }
 
   function openNewInvoice() {
@@ -358,6 +361,7 @@ export function Organizer({
     setIDue(inv.due_date ?? "");
     setIContact(inv.contact ?? "");
     setINotes(inv.notes ?? "");
+    setIAssignee(inv.assigned_to ?? currentUser.id);
     setShowInvoiceForm(true);
   }
 
@@ -372,6 +376,7 @@ export function Organizer({
       due_date: iDue || null,
       contact: iContact.trim(),
       notes: iNotes.trim() || null,
+      assigned_to: iAssignee || currentUser.id,
     };
     if (editInvoiceId) {
       const { error } = await supabase
@@ -850,6 +855,7 @@ export function Organizer({
                           <th className="py-2 pr-3">Due date</th>
                           <th className="py-2 pr-3">Amount due</th>
                           <th className="py-2 pr-3">Contact</th>
+                          <th className="py-2 pr-3">Assigned to</th>
                           <th className="py-2 pr-3">Status</th>
                           <th className="py-2 pr-3 text-right">Actions</th>
                         </tr>
@@ -892,6 +898,17 @@ export function Organizer({
                                   <div className="text-xs text-gray-500 mt-0.5 max-w-[280px] truncate">
                                     {inv.notes}
                                   </div>
+                                )}
+                              </td>
+                              <td className="py-2 pr-3 text-ink">
+                                {inv.assigned_to ? (
+                                  inv.assigned_to === currentUser.id ? (
+                                    <span className="text-emerald-700">You</span>
+                                  ) : (
+                                    memberLabel(members.find((m) => m.id === inv.assigned_to))
+                                  )
+                                ) : (
+                                  <span className="text-gray-400">Unassigned</span>
                                 )}
                               </td>
                               <td className="py-2 pr-3">
@@ -1031,6 +1048,32 @@ export function Organizer({
                   placeholder="Name, email, or phone"
                   className="w-full border border-border rounded-lg px-3 py-2 text-sm"
                 />
+              </div>
+
+              <div>
+                <label className="block text-xs uppercase tracking-wider text-gray-500 mb-1">
+                  Assigned to
+                </label>
+                <select
+                  value={iAssignee}
+                  onChange={(e) => setIAssignee(e.target.value)}
+                  className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-white"
+                >
+                  <option value={currentUser.id}>
+                    {memberLabel(members.find((m) => m.id === currentUser.id)) || currentUser.email}{" "}
+                    (you)
+                  </option>
+                  {members
+                    .filter((m) => m.id !== currentUser.id)
+                    .map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {memberLabel(m)}
+                      </option>
+                    ))}
+                </select>
+                <p className="text-[11px] text-gray-500 mt-1">
+                  Only the assignee (and you, the creator) can see this invoice.
+                </p>
               </div>
 
               <div>

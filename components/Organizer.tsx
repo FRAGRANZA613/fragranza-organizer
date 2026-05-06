@@ -34,9 +34,24 @@ export interface Member {
   display_name: string | null;
 }
 
+export interface Invoice {
+  id: string;
+  invoice_number: string;
+  amount_due: number;
+  due_date: string | null; // YYYY-MM-DD
+  contact: string;
+  notes: string | null;
+  paid: boolean;
+  paid_at: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 interface Props {
   initialItems: Item[];
   initialMembers: Member[];
+  initialInvoices: Invoice[];
   currentUser: { id: string; email: string };
 }
 
@@ -96,13 +111,30 @@ function ymd(d: Date) {
   return `${y}-${m}-${day}`;
 }
 
-export function Organizer({ initialItems, initialMembers, currentUser }: Props) {
+export function Organizer({
+  initialItems,
+  initialMembers,
+  initialInvoices,
+  currentUser,
+}: Props) {
   const supabase = supabaseBrowser();
 
   const [items, setItems] = useState<Item[]>(initialItems);
   const [members, setMembers] = useState<Member[]>(initialMembers);
+  const [invoices, setInvoices] = useState<Invoice[]>(initialInvoices);
 
-  const [view, setView] = useState<"list" | "calendar">("list");
+  const [view, setView] = useState<"list" | "calendar" | "invoices">("list");
+
+  // Invoice form state
+  const [showInvoiceForm, setShowInvoiceForm] = useState(false);
+  const [editInvoiceId, setEditInvoiceId] = useState<string | null>(null);
+  const [invFilter, setInvFilter] = useState<"overdue" | "open" | "paid" | "all">("overdue");
+  const [iNumber, setINumber] = useState("");
+  const [iAmount, setIAmount] = useState("");
+  const [iDue, setIDue] = useState("");
+  const [iContact, setIContact] = useState("");
+  const [iNotes, setINotes] = useState("");
+  const [savingInvoice, setSavingInvoice] = useState(false);
   const [filterType, setFilterType] = useState<"all" | ItemType>("all");
   const [filterPriority, setFilterPriority] = useState<"all" | Priority>("all");
   const [filterStatus, setFilterStatus] = useState<"all" | Status>("all");
@@ -174,6 +206,28 @@ export function Organizer({ initialItems, initialMembers, currentUser }: Props) 
             if (payload.eventType === "DELETE") {
               const old = payload.old as { id: string };
               return prev.filter((p) => p.id !== old.id);
+            }
+            return prev;
+          });
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "invoices" },
+        (payload) => {
+          setInvoices((prev) => {
+            if (payload.eventType === "INSERT") {
+              const next = payload.new as Invoice;
+              if (prev.some((i) => i.id === next.id)) return prev;
+              return [...prev, next];
+            }
+            if (payload.eventType === "UPDATE") {
+              const next = payload.new as Invoice;
+              return prev.map((i) => (i.id === next.id ? next : i));
+            }
+            if (payload.eventType === "DELETE") {
+              const old = payload.old as { id: string };
+              return prev.filter((i) => i.id !== old.id);
             }
             return prev;
           });
@@ -275,6 +329,84 @@ export function Organizer({ initialItems, initialMembers, currentUser }: Props) 
 
   async function quickStatus(id: string, status: Status) {
     const { error } = await supabase.from("items").update({ status }).eq("id", id);
+    if (error) alert(error.message);
+  }
+
+  // ---------------------- Invoice CRUD ----------------------
+  function resetInvoiceForm() {
+    setEditInvoiceId(null);
+    setINumber("");
+    setIAmount("");
+    setIDue("");
+    setIContact("");
+    setINotes("");
+  }
+
+  function openNewInvoice() {
+    resetInvoiceForm();
+    setShowInvoiceForm(true);
+  }
+
+  function openEditInvoice(inv: Invoice) {
+    setEditInvoiceId(inv.id);
+    setINumber(inv.invoice_number ?? "");
+    setIAmount(inv.amount_due != null ? String(inv.amount_due) : "");
+    setIDue(inv.due_date ?? "");
+    setIContact(inv.contact ?? "");
+    setINotes(inv.notes ?? "");
+    setShowInvoiceForm(true);
+  }
+
+  async function saveInvoice(e: React.FormEvent) {
+    e.preventDefault();
+    setSavingInvoice(true);
+    const amountNum = Number(iAmount);
+    const payload = {
+      invoice_number: iNumber.trim(),
+      amount_due: Number.isFinite(amountNum) ? amountNum : 0,
+      due_date: iDue || null,
+      contact: iContact.trim(),
+      notes: iNotes.trim() || null,
+    };
+    if (editInvoiceId) {
+      const { error } = await supabase
+        .from("invoices")
+        .update(payload)
+        .eq("id", editInvoiceId);
+      setSavingInvoice(false);
+      if (error) {
+        alert(error.message);
+        return;
+      }
+    } else {
+      const { data, error } = await supabase
+        .from("invoices")
+        .insert({ ...payload, created_by: currentUser.id })
+        .select()
+        .single();
+      setSavingInvoice(false);
+      if (error) {
+        alert(error.message);
+        return;
+      }
+      if (data) setInvoices((prev) => [...prev, data as Invoice]);
+    }
+    setShowInvoiceForm(false);
+    resetInvoiceForm();
+  }
+
+  async function deleteInvoice(id: string) {
+    if (!confirm("Delete this invoice?")) return;
+    const { error } = await supabase.from("invoices").delete().eq("id", id);
+    if (error) alert(error.message);
+  }
+
+  async function togglePaid(inv: Invoice) {
+    const next = !inv.paid;
+    const { error } = await supabase
+      .from("invoices")
+      .update({ paid: next, paid_at: next ? new Date().toISOString() : null })
+      .eq("id", inv.id);
     if (error) alert(error.message);
   }
 
@@ -405,6 +537,14 @@ export function Organizer({ initialItems, initialMembers, currentUser }: Props) 
               }`}
             >
               Calendar
+            </button>
+            <button
+              onClick={() => setView("invoices")}
+              className={`px-4 py-2 text-sm ${
+                view === "invoices" ? "bg-accent text-white" : "text-ink hover:bg-gray-50"
+              }`}
+            >
+              Invoices
             </button>
           </div>
 
@@ -626,7 +766,285 @@ export function Organizer({ initialItems, initialMembers, currentUser }: Props) 
             </div>
           </section>
         )}
+
+        {/* Invoices view */}
+        {view === "invoices" && (
+          <section className="bg-white border border-border rounded-xl p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+              <div className="flex items-center gap-2">
+                <h2 className="font-semibold text-ink">Invoices</h2>
+                <div className="inline-flex bg-white border border-border rounded-lg overflow-hidden text-xs">
+                  {(["overdue", "open", "paid", "all"] as const).map((f) => (
+                    <button
+                      key={f}
+                      onClick={() => setInvFilter(f)}
+                      className={`px-3 py-1.5 capitalize ${
+                        invFilter === f
+                          ? "bg-accent text-white"
+                          : "text-ink hover:bg-gray-50"
+                      }`}
+                    >
+                      {f}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <button
+                onClick={openNewInvoice}
+                className="px-3 py-2 rounded-lg bg-accent text-white text-sm hover:opacity-90"
+              >
+                + New invoice
+              </button>
+            </div>
+
+            {(() => {
+              const today = ymd(new Date());
+              const filtered = invoices
+                .filter((inv) => {
+                  if (invFilter === "all") return true;
+                  if (invFilter === "paid") return inv.paid;
+                  if (invFilter === "open") return !inv.paid;
+                  // overdue
+                  return !inv.paid && !!inv.due_date && inv.due_date < today;
+                })
+                .sort((a, b) => {
+                  const ad = a.due_date ?? "9999-12-31";
+                  const bd = b.due_date ?? "9999-12-31";
+                  return ad.localeCompare(bd);
+                });
+
+              const totalDue = filtered
+                .filter((i) => !i.paid)
+                .reduce((sum, i) => sum + Number(i.amount_due ?? 0), 0);
+
+              if (filtered.length === 0) {
+                return (
+                  <div className="text-sm text-gray-500 py-8 text-center">
+                    No invoices in this view.
+                  </div>
+                );
+              }
+
+              return (
+                <>
+                  <div className="text-xs text-gray-500 mb-2">
+                    {filtered.length} invoice{filtered.length === 1 ? "" : "s"} · Outstanding:{" "}
+                    <span className="text-ink font-semibold">
+                      ${totalDue.toLocaleString(undefined, {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </span>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-left text-xs uppercase tracking-wider text-gray-500 border-b border-border">
+                          <th className="py-2 pr-3">Invoice #</th>
+                          <th className="py-2 pr-3">Due date</th>
+                          <th className="py-2 pr-3">Amount due</th>
+                          <th className="py-2 pr-3">Contact</th>
+                          <th className="py-2 pr-3">Status</th>
+                          <th className="py-2 pr-3 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filtered.map((inv) => {
+                          const isOverdue =
+                            !inv.paid && !!inv.due_date && inv.due_date < today;
+                          return (
+                            <tr
+                              key={inv.id}
+                              className="border-b border-border last:border-0 hover:bg-gray-50"
+                            >
+                              <td className="py-2 pr-3 font-medium text-ink">
+                                {inv.invoice_number || "—"}
+                              </td>
+                              <td className="py-2 pr-3">
+                                <span
+                                  className={
+                                    isOverdue ? "text-rose-600 font-medium" : "text-ink"
+                                  }
+                                >
+                                  {inv.due_date
+                                    ? new Date(inv.due_date + "T00:00:00").toLocaleDateString()
+                                    : "—"}
+                                </span>
+                              </td>
+                              <td className="py-2 pr-3 font-medium text-ink">
+                                ${Number(inv.amount_due ?? 0).toLocaleString(undefined, {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                })}
+                              </td>
+                              <td className="py-2 pr-3 text-ink">
+                                {inv.contact || <span className="text-gray-400">—</span>}
+                                {inv.notes && (
+                                  <div className="text-xs text-gray-500 mt-0.5 max-w-[280px] truncate">
+                                    {inv.notes}
+                                  </div>
+                                )}
+                              </td>
+                              <td className="py-2 pr-3">
+                                {inv.paid ? (
+                                  <span className="inline-block px-2 py-0.5 rounded text-xs bg-emerald-100 text-emerald-700">
+                                    Paid
+                                  </span>
+                                ) : isOverdue ? (
+                                  <span className="inline-block px-2 py-0.5 rounded text-xs bg-rose-100 text-rose-700">
+                                    Overdue
+                                  </span>
+                                ) : (
+                                  <span className="inline-block px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-700">
+                                    Open
+                                  </span>
+                                )}
+                              </td>
+                              <td className="py-2 pr-3 text-right whitespace-nowrap">
+                                <button
+                                  onClick={() => togglePaid(inv)}
+                                  className="text-xs px-2 py-1 rounded border border-border hover:bg-white mr-1"
+                                >
+                                  {inv.paid ? "Mark unpaid" : "Mark paid"}
+                                </button>
+                                <button
+                                  onClick={() => openEditInvoice(inv)}
+                                  className="text-xs px-2 py-1 rounded border border-border hover:bg-white mr-1"
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  onClick={() => deleteInvoice(inv.id)}
+                                  className="text-xs px-2 py-1 rounded border border-border text-rose-600 hover:bg-white"
+                                >
+                                  Delete
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              );
+            })()}
+          </section>
+        )}
       </main>
+
+      {/* Invoice form modal */}
+      {showInvoiceForm && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+            <form onSubmit={saveInvoice} className="p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-semibold text-ink">
+                  {editInvoiceId ? "Edit invoice" : "New invoice"}
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowInvoiceForm(false);
+                    resetInvoiceForm();
+                  }}
+                  className="text-gray-400 hover:text-ink text-xl leading-none"
+                >
+                  ×
+                </button>
+              </div>
+
+              <div>
+                <label className="block text-xs uppercase tracking-wider text-gray-500 mb-1">
+                  Invoice #
+                </label>
+                <input
+                  type="text"
+                  value={iNumber}
+                  onChange={(e) => setINumber(e.target.value)}
+                  placeholder="INV-1042"
+                  className="w-full border border-border rounded-lg px-3 py-2 text-sm"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs uppercase tracking-wider text-gray-500 mb-1">
+                    Amount due
+                  </label>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    step="0.01"
+                    min="0"
+                    value={iAmount}
+                    onChange={(e) => setIAmount(e.target.value)}
+                    placeholder="1250.00"
+                    className="w-full border border-border rounded-lg px-3 py-2 text-sm"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs uppercase tracking-wider text-gray-500 mb-1">
+                    Due date
+                  </label>
+                  <input
+                    type="date"
+                    value={iDue}
+                    onChange={(e) => setIDue(e.target.value)}
+                    className="w-full border border-border rounded-lg px-3 py-2 text-sm"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs uppercase tracking-wider text-gray-500 mb-1">
+                  Contact for follow-up
+                </label>
+                <input
+                  type="text"
+                  value={iContact}
+                  onChange={(e) => setIContact(e.target.value)}
+                  placeholder="Name, email, or phone"
+                  className="w-full border border-border rounded-lg px-3 py-2 text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs uppercase tracking-wider text-gray-500 mb-1">
+                  Notes
+                </label>
+                <textarea
+                  value={iNotes}
+                  onChange={(e) => setINotes(e.target.value)}
+                  rows={3}
+                  className="w-full border border-border rounded-lg px-3 py-2 text-sm"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowInvoiceForm(false);
+                    resetInvoiceForm();
+                  }}
+                  className="px-3 py-2 text-sm rounded-lg border border-border hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingInvoice}
+                  className="px-4 py-2 text-sm rounded-lg bg-accent text-white hover:opacity-90 disabled:opacity-60"
+                >
+                  {savingInvoice ? "Saving…" : editInvoiceId ? "Save changes" : "Add invoice"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Item form modal */}
       {showForm && (

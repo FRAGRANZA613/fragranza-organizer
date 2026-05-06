@@ -14,7 +14,7 @@ export default async function Home() {
 
   if (!user) redirect("/login");
 
-  const [{ data: items }, { data: members }] = await Promise.all([
+  const [{ data: items }, { data: members }, { data: invoices }] = await Promise.all([
     supabase
       .from("items")
       .select("*")
@@ -23,12 +23,17 @@ export default async function Home() {
       .from("profiles")
       .select("id, email, display_name")
       .order("email", { ascending: true }),
+    supabase
+      .from("invoices")
+      .select("*")
+      .order("due_date", { ascending: true, nullsFirst: false }),
   ]);
 
   return (
     <Organizer
       initialItems={items ?? []}
       initialMembers={members ?? []}
+      initialInvoices={invoices ?? []}
       currentUser={{
         id: user.id,
         email: user.email ?? "",

@@ -7,6 +7,7 @@
 create table if not exists public.invoices (
   id uuid primary key default gen_random_uuid(),
   invoice_number text not null default '',
+  company_id text not null default '',
   amount_due numeric(12,2) not null default 0,
   due_date date,
   contact text not null default '',
@@ -18,8 +19,12 @@ create table if not exists public.invoices (
   updated_at timestamptz not null default now()
 );
 
+-- Add the column for installs that ran an earlier version of this script.
+alter table public.invoices add column if not exists company_id text not null default '';
+
 create index if not exists invoices_due_date_idx on public.invoices (due_date);
 create index if not exists invoices_paid_idx on public.invoices (paid);
+create index if not exists invoices_company_idx on public.invoices (company_id);
 
 drop trigger if exists invoices_touch on public.invoices;
 create trigger invoices_touch before update on public.invoices

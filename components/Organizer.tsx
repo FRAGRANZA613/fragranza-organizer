@@ -37,6 +37,7 @@ export interface Member {
 export interface Invoice {
   id: string;
   invoice_number: string;
+  company_id: string;
   amount_due: number;
   due_date: string | null; // YYYY-MM-DD
   contact: string;
@@ -130,6 +131,7 @@ export function Organizer({
   const [editInvoiceId, setEditInvoiceId] = useState<string | null>(null);
   const [invFilter, setInvFilter] = useState<"overdue" | "open" | "paid" | "all">("overdue");
   const [iNumber, setINumber] = useState("");
+  const [iCompany, setICompany] = useState("");
   const [iAmount, setIAmount] = useState("");
   const [iDue, setIDue] = useState("");
   const [iContact, setIContact] = useState("");
@@ -336,6 +338,7 @@ export function Organizer({
   function resetInvoiceForm() {
     setEditInvoiceId(null);
     setINumber("");
+    setICompany("");
     setIAmount("");
     setIDue("");
     setIContact("");
@@ -350,6 +353,7 @@ export function Organizer({
   function openEditInvoice(inv: Invoice) {
     setEditInvoiceId(inv.id);
     setINumber(inv.invoice_number ?? "");
+    setICompany(inv.company_id ?? "");
     setIAmount(inv.amount_due != null ? String(inv.amount_due) : "");
     setIDue(inv.due_date ?? "");
     setIContact(inv.contact ?? "");
@@ -363,6 +367,7 @@ export function Organizer({
     const amountNum = Number(iAmount);
     const payload = {
       invoice_number: iNumber.trim(),
+      company_id: iCompany.trim(),
       amount_due: Number.isFinite(amountNum) ? amountNum : 0,
       due_date: iDue || null,
       contact: iContact.trim(),
@@ -841,6 +846,7 @@ export function Organizer({
                       <thead>
                         <tr className="text-left text-xs uppercase tracking-wider text-gray-500 border-b border-border">
                           <th className="py-2 pr-3">Invoice #</th>
+                          <th className="py-2 pr-3">Company ID</th>
                           <th className="py-2 pr-3">Due date</th>
                           <th className="py-2 pr-3">Amount due</th>
                           <th className="py-2 pr-3">Contact</th>
@@ -859,6 +865,9 @@ export function Organizer({
                             >
                               <td className="py-2 pr-3 font-medium text-ink">
                                 {inv.invoice_number || "—"}
+                              </td>
+                              <td className="py-2 pr-3 text-ink">
+                                {inv.company_id || <span className="text-gray-400">—</span>}
                               </td>
                               <td className="py-2 pr-3">
                                 <span
@@ -954,17 +963,31 @@ export function Organizer({
                 </button>
               </div>
 
-              <div>
-                <label className="block text-xs uppercase tracking-wider text-gray-500 mb-1">
-                  Invoice #
-                </label>
-                <input
-                  type="text"
-                  value={iNumber}
-                  onChange={(e) => setINumber(e.target.value)}
-                  placeholder="INV-1042"
-                  className="w-full border border-border rounded-lg px-3 py-2 text-sm"
-                />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs uppercase tracking-wider text-gray-500 mb-1">
+                    Invoice #
+                  </label>
+                  <input
+                    type="text"
+                    value={iNumber}
+                    onChange={(e) => setINumber(e.target.value)}
+                    placeholder="INV-1042"
+                    className="w-full border border-border rounded-lg px-3 py-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs uppercase tracking-wider text-gray-500 mb-1">
+                    Company ID
+                  </label>
+                  <input
+                    type="text"
+                    value={iCompany}
+                    onChange={(e) => setICompany(e.target.value)}
+                    placeholder="ACME-001"
+                    className="w-full border border-border rounded-lg px-3 py-2 text-sm"
+                  />
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">

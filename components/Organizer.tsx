@@ -40,7 +40,10 @@ export interface Invoice {
   company_id: string;
   amount_due: number;
   due_date: string | null; // YYYY-MM-DD
-  contact: string;
+  contact: string; // legacy free-text contact
+  contact_name: string;
+  contact_phone: string;
+  contact_email: string;
   notes: string | null;
   paid: boolean;
   paid_at: string | null;
@@ -135,7 +138,9 @@ export function Organizer({
   const [iCompany, setICompany] = useState("");
   const [iAmount, setIAmount] = useState("");
   const [iDue, setIDue] = useState("");
-  const [iContact, setIContact] = useState("");
+  const [iContactName, setIContactName] = useState("");
+  const [iContactPhone, setIContactPhone] = useState("");
+  const [iContactEmail, setIContactEmail] = useState("");
   const [iNotes, setINotes] = useState("");
   const [iAssignee, setIAssignee] = useState<string>(currentUser.id);
   const [savingInvoice, setSavingInvoice] = useState(false);
@@ -343,7 +348,9 @@ export function Organizer({
     setICompany("");
     setIAmount("");
     setIDue("");
-    setIContact("");
+    setIContactName("");
+    setIContactPhone("");
+    setIContactEmail("");
     setINotes("");
     setIAssignee(currentUser.id);
   }
@@ -359,7 +366,10 @@ export function Organizer({
     setICompany(inv.company_id ?? "");
     setIAmount(inv.amount_due != null ? String(inv.amount_due) : "");
     setIDue(inv.due_date ?? "");
-    setIContact(inv.contact ?? "");
+    // Fall back to legacy `contact` text on the name field if the new ones are blank.
+    setIContactName(inv.contact_name || (inv.contact_phone || inv.contact_email ? "" : inv.contact ?? ""));
+    setIContactPhone(inv.contact_phone ?? "");
+    setIContactEmail(inv.contact_email ?? "");
     setINotes(inv.notes ?? "");
     setIAssignee(inv.assigned_to ?? currentUser.id);
     setShowInvoiceForm(true);
@@ -374,7 +384,11 @@ export function Organizer({
       company_id: iCompany.trim(),
       amount_due: Number.isFinite(amountNum) ? amountNum : 0,
       due_date: iDue || null,
-      contact: iContact.trim(),
+      contact_name: iContactName.trim(),
+      contact_phone: iContactPhone.trim(),
+      contact_email: iContactEmail.trim(),
+      // Keep the legacy contact column in sync for any UI that still reads it.
+      contact: iContactName.trim(),
       notes: iNotes.trim() || null,
       assigned_to: iAssignee || currentUser.id,
     };
@@ -1003,7 +1017,43 @@ export function Organizer({
                                 })}
                               </td>
                               <td className="py-2 pr-3 text-ink">
-                                {inv.contact || <span className="text-gray-400">—</span>}
+                                {(() => {
+                                  const name =
+                                    inv.contact_name ||
+                                    (!inv.contact_phone && !inv.contact_email
+                                      ? inv.contact ?? ""
+                                      : "");
+                                  const hasAny =
+                                    name || inv.contact_phone || inv.contact_email;
+                                  if (!hasAny) {
+                                    return <span className="text-gray-400">—</span>;
+                                  }
+                                  return (
+                                    <div className="leading-tight">
+                                      {name && <div>{name}</div>}
+                                      {inv.contact_phone && (
+                                        <div className="text-xs text-gray-500">
+                                          <a
+                                            href={`tel:${inv.contact_phone}`}
+                                            className="hover:underline"
+                                          >
+                                            {inv.contact_phone}
+                                          </a>
+                                        </div>
+                                      )}
+                                      {inv.contact_email && (
+                                        <div className="text-xs text-gray-500">
+                                          <a
+                                            href={`mailto:${inv.contact_email}`}
+                                            className="hover:underline"
+                                          >
+                                            {inv.contact_email}
+                                          </a>
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })()}
                                 {inv.notes && (
                                   <div className="text-xs text-gray-500 mt-0.5 max-w-[280px] truncate">
                                     {inv.notes}
@@ -1147,17 +1197,42 @@ export function Organizer({
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs uppercase tracking-wider text-gray-500 mb-1">
+              <div className="space-y-2 border border-border rounded-lg p-3 bg-gray-50">
+                <div className="text-xs uppercase tracking-wider text-gray-500">
                   Contact for follow-up
-                </label>
-                <input
-                  type="text"
-                  value={iContact}
-                  onChange={(e) => setIContact(e.target.value)}
-                  placeholder="Name, email, or phone"
-                  className="w-full border border-border rounded-lg px-3 py-2 text-sm"
-                />
+                </div>
+                <div>
+                  <label className="block text-[11px] text-gray-500 mb-1">Name</label>
+                  <input
+                    type="text"
+                    value={iContactName}
+                    onChange={(e) => setIContactName(e.target.value)}
+                    placeholder="Jane Smith"
+                    className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-white"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] text-gray-500 mb-1">Phone</label>
+                    <input
+                      type="tel"
+                      value={iContactPhone}
+                      onChange={(e) => setIContactPhone(e.target.value)}
+                      placeholder="555-123-4567"
+                      className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-gray-500 mb-1">Email</label>
+                    <input
+                      type="email"
+                      value={iContactEmail}
+                      onChange={(e) => setIContactEmail(e.target.value)}
+                      placeholder="jane@acme.com"
+                      className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-white"
+                    />
+                  </div>
+                </div>
               </div>
 
               <div>

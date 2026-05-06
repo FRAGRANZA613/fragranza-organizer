@@ -10,7 +10,10 @@ create table if not exists public.invoices (
   company_id text not null default '',
   amount_due numeric(12,2) not null default 0,
   due_date date,
-  contact text not null default '',
+  contact text not null default '',          -- legacy free-text contact (kept for back-compat)
+  contact_name text not null default '',
+  contact_phone text not null default '',
+  contact_email text not null default '',
   notes text default '',
   paid boolean not null default false,
   paid_at timestamptz,
@@ -21,8 +24,16 @@ create table if not exists public.invoices (
 );
 
 -- Additive columns for installs that ran an earlier version of this script.
-alter table public.invoices add column if not exists company_id  text not null default '';
-alter table public.invoices add column if not exists assigned_to uuid references auth.users(id) on delete set null;
+alter table public.invoices add column if not exists company_id    text not null default '';
+alter table public.invoices add column if not exists assigned_to   uuid references auth.users(id) on delete set null;
+alter table public.invoices add column if not exists contact_name  text not null default '';
+alter table public.invoices add column if not exists contact_phone text not null default '';
+alter table public.invoices add column if not exists contact_email text not null default '';
+
+-- Backfill: legacy contact text moves into contact_name so nothing is lost.
+update public.invoices
+set contact_name = contact
+where contact_name = '' and contact <> '';
 
 -- Backfill: any existing invoice without an assignee defaults to its creator,
 -- so previously-created rows remain visible to whoever made them.

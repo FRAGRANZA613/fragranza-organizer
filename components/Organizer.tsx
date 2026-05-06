@@ -807,6 +807,116 @@ export function Organizer({
               </button>
             </div>
 
+            {/* Receipts forecast: how much money is expected to come in each day */}
+            {(() => {
+              const today = ymd(new Date());
+              const fmtUSD = (n: number) =>
+                "$" +
+                n.toLocaleString(undefined, {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                });
+
+              const unpaid = invoices.filter((i) => !i.paid);
+              const overdueTotal = unpaid
+                .filter((i) => !!i.due_date && i.due_date < today)
+                .reduce((s, i) => s + Number(i.amount_due ?? 0), 0);
+
+              // Group future + today by date string.
+              const buckets = new Map<string, { date: string; count: number; total: number }>();
+              unpaid.forEach((i) => {
+                if (!i.due_date) return;
+                if (i.due_date < today) return;
+                const b = buckets.get(i.due_date) ?? {
+                  date: i.due_date,
+                  count: 0,
+                  total: 0,
+                };
+                b.count += 1;
+                b.total += Number(i.amount_due ?? 0);
+                buckets.set(i.due_date, b);
+              });
+              const days = Array.from(buckets.values()).sort((a, b) =>
+                a.date.localeCompare(b.date)
+              );
+
+              const within = (d: string, days: number) => {
+                const t = new Date(today + "T00:00:00").getTime();
+                const cutoff = t + days * 86400000;
+                return new Date(d + "T00:00:00").getTime() <= cutoff;
+              };
+              const next7 = days
+                .filter((d) => within(d.date, 7))
+                .reduce((s, d) => s + d.total, 0);
+              const next30 = days
+                .filter((d) => within(d.date, 30))
+                .reduce((s, d) => s + d.total, 0);
+              const grandTotal = days.reduce((s, d) => s + d.total, 0);
+
+              if (days.length === 0 && overdueTotal === 0) return null;
+
+              const fmtLong = (d: string) =>
+                new Date(d + "T00:00:00").toLocaleDateString(undefined, {
+                  weekday: "short",
+                  month: "short",
+                  day: "numeric",
+                });
+              const isToday = (d: string) => d === today;
+
+              return (
+                <div className="mb-6 border border-border rounded-xl overflow-hidden">
+                  <div className="bg-gray-50 px-4 py-2 border-b border-border flex flex-wrap items-baseline justify-between gap-2">
+                    <div className="text-sm font-semibold text-ink">Receipts forecast</div>
+                    <div className="text-xs text-gray-500 flex flex-wrap gap-x-4 gap-y-1">
+                      <span>
+                        Overdue (still expected):{" "}
+                        <span className="text-rose-600 font-semibold">
+                          {fmtUSD(overdueTotal)}
+                        </span>
+                      </span>
+                      <span>
+                        Next 7 days: <span className="text-ink font-semibold">{fmtUSD(next7)}</span>
+                      </span>
+                      <span>
+                        Next 30 days:{" "}
+                        <span className="text-ink font-semibold">{fmtUSD(next30)}</span>
+                      </span>
+                      <span>
+                        Total expected:{" "}
+                        <span className="text-ink font-semibold">{fmtUSD(grandTotal)}</span>
+                      </span>
+                    </div>
+                  </div>
+                  {days.length === 0 ? (
+                    <div className="px-4 py-3 text-sm text-gray-500">
+                      No invoices coming due. Only the overdue total above is outstanding.
+                    </div>
+                  ) : (
+                    <div className="flex overflow-x-auto divide-x divide-border">
+                      {days.map((d) => (
+                        <div
+                          key={d.date}
+                          className={`min-w-[140px] px-4 py-3 ${
+                            isToday(d.date) ? "bg-amber-50" : ""
+                          }`}
+                        >
+                          <div className="text-[11px] uppercase tracking-wider text-gray-500">
+                            {isToday(d.date) ? "Today" : fmtLong(d.date)}
+                          </div>
+                          <div className="text-lg font-semibold text-ink mt-0.5">
+                            {fmtUSD(d.total)}
+                          </div>
+                          <div className="text-[11px] text-gray-500">
+                            {d.count} invoice{d.count === 1 ? "" : "s"}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
             {(() => {
               const today = ymd(new Date());
               const filtered = invoices

@@ -24,6 +24,7 @@ import {
   Truck,
   Wrench,
   ArrowLeft,
+  DollarSign,
 } from "lucide-react";
 import Link from "next/link";
 import { supabaseBrowser } from "@/lib/supabase/client";
@@ -58,6 +59,8 @@ export interface ScentClient {
   service_type: ServiceType;
   done: boolean;
   completed_at: string | null;
+  paid: boolean;
+  paid_at: string | null;
   service_notes: string | null;
   notes_updated_at: string | null;
   tracking: string | null;
@@ -287,6 +290,8 @@ export function ScentScheduler({
       service_type: form.serviceType,
       done: false,
       completed_at: null,
+      paid: false,
+      paid_at: null,
       service_notes: "",
       notes_updated_at: null,
       tracking: "",
@@ -328,6 +333,22 @@ export function ScentScheduler({
     const patch = {
       done: nextDone,
       completed_at: nextDone ? new Date().toISOString() : null,
+    };
+    setClients((prev) => prev.map((x) => (x.id === id ? { ...x, ...patch } : x)));
+    const { error } = await supabase
+      .from("scent_clients")
+      .update(patch)
+      .eq("id", id);
+    if (error) alert(error.message);
+  };
+
+  const togglePaid = async (id: string) => {
+    const c = clients.find((x) => x.id === id);
+    if (!c) return;
+    const nextPaid = !c.paid;
+    const patch = {
+      paid: nextPaid,
+      paid_at: nextPaid ? new Date().toISOString() : null,
     };
     setClients((prev) => prev.map((x) => (x.id === id ? { ...x, ...patch } : x)));
     const { error } = await supabase
@@ -498,6 +519,8 @@ export function ScentScheduler({
         .update({
           done: false,
           completed_at: null,
+          paid: false,
+          paid_at: null,
           photos: [],
           service_notes: "",
           notes_updated_at: null,
@@ -521,6 +544,8 @@ export function ScentScheduler({
         ...c,
         done: false,
         completed_at: null,
+        paid: false,
+        paid_at: null,
         photos: [],
         service_notes: "",
         notes_updated_at: null,
@@ -877,10 +902,25 @@ export function ScentScheduler({
                               Ship by {c.day}
                             </p>
                           </div>
-                          <span className="mono text-[10px] uppercase tracking-widest bg-blue-50 border border-blue-200 px-2 py-1 text-blue-700 flex items-center gap-1">
-                            <Truck className="w-3 h-3" />
-                            Shipping
-                          </span>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="mono text-[10px] uppercase tracking-widest bg-blue-50 border border-blue-200 px-2 py-1 text-blue-700 flex items-center gap-1">
+                              <Truck className="w-3 h-3" />
+                              Shipping
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => togglePaid(c.id)}
+                              className={`mono text-[10px] uppercase tracking-widest border px-2 py-1 flex items-center gap-1 transition ${
+                                c.paid
+                                  ? "bg-emerald-50 border-emerald-300 text-emerald-700 hover:bg-emerald-100"
+                                  : "bg-rose-50 border-rose-200 text-rose-700 hover:bg-rose-100"
+                              }`}
+                              aria-label={c.paid ? "Mark unpaid" : "Mark paid"}
+                            >
+                              <DollarSign className="w-3 h-3" />
+                              {c.paid ? "Paid" : "Unpaid"}
+                            </button>
+                          </div>
                         </div>
 
                         {getScents(c).length > 0 && (
@@ -1049,6 +1089,19 @@ export function ScentScheduler({
                               <Wrench className="w-3 h-3" />
                               {c.technician}
                             </span>
+                            <button
+                              type="button"
+                              onClick={() => togglePaid(c.id)}
+                              className={`mono text-[10px] uppercase tracking-widest border px-2 py-1 flex items-center gap-1 transition ${
+                                c.paid
+                                  ? "bg-emerald-50 border-emerald-300 text-emerald-700 hover:bg-emerald-100"
+                                  : "bg-rose-50 border-rose-200 text-rose-700 hover:bg-rose-100"
+                              }`}
+                              aria-label={c.paid ? "Mark unpaid" : "Mark paid"}
+                            >
+                              <DollarSign className="w-3 h-3" />
+                              {c.paid ? "Paid" : "Unpaid"}
+                            </button>
                           </div>
                         </div>
 

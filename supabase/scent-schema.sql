@@ -32,6 +32,8 @@ create table if not exists public.scent_clients (
   service_type text not null default 'physical' check (service_type in ('physical','shipping')),
   done boolean not null default false,
   completed_at timestamptz,
+  paid boolean not null default false,
+  paid_at timestamptz,
   service_notes text default '',
   notes_updated_at timestamptz,
   tracking text default '',
@@ -41,7 +43,12 @@ create table if not exists public.scent_clients (
   updated_at timestamptz not null default now()
 );
 
+-- Additive for installs that ran an earlier version of this script.
+alter table public.scent_clients add column if not exists paid    boolean not null default false;
+alter table public.scent_clients add column if not exists paid_at timestamptz;
+
 create index if not exists scent_clients_week_idx on public.scent_clients (week);
+create index if not exists scent_clients_paid_idx on public.scent_clients (paid);
 
 drop trigger if exists scent_clients_touch on public.scent_clients;
 create trigger scent_clients_touch before update on public.scent_clients

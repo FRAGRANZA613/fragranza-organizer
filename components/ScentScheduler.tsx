@@ -26,6 +26,7 @@ import {
   ArrowLeft,
   DollarSign,
   CreditCard,
+  Pencil,
 } from "lucide-react";
 import Link from "next/link";
 import { supabaseBrowser } from "@/lib/supabase/client";
@@ -169,6 +170,7 @@ export function ScentScheduler({
   const [clients, setClients] = useState<ScentClient[]>(initialClients);
   const [activeWeek, setActiveWeek] = useState(1);
   const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [currentMonth, setCurrentMonth] = useState(
     initialMonth || makeMonthString(),
   );
@@ -278,9 +280,87 @@ export function ScentScheduler({
 
   // ---------------------- CRUD ----------------------
 
-  const addClient = async () => {
+  const openEdit = (c: ScentClient) => {
+    setEditingId(c.id);
+    setForm({
+      name: c.name,
+      address: c.address,
+      time: c.time ?? "",
+      day: c.day,
+      week: c.week,
+      contact: c.contact ?? "",
+      notes: c.notes ?? "",
+      technician: c.technician ?? "Tech 1",
+      scents:
+        Array.isArray(c.scents) && c.scents.length > 0
+          ? c.scents.map((s) => ({ scent: s.scent ?? "", ml: s.ml ?? "" }))
+          : [{ scent: "", ml: "" }],
+      serviceType: (c.service_type as ServiceType) || "physical",
+      subscriptionValue:
+        Number(c.subscription_value) > 0 ? String(c.subscription_value) : "",
+    });
+    setShowForm(true);
+  };
+
+  const closeForm = () => {
+    setShowForm(false);
+    setEditingId(null);
+    setForm({
+      name: "",
+      address: "",
+      time: "",
+      day: "Monday",
+      week: activeWeek,
+      contact: "",
+      notes: "",
+      technician: "Tech 1",
+      scents: [{ scent: "", ml: "" }],
+      serviceType: "physical",
+      subscriptionValue: "",
+    });
+  };
+
+  const saveClient = async () => {
     if (!form.name.trim() || !form.address.trim()) return;
     const cleanScents = form.scents.filter((s) => s.scent.trim() || s.ml);
+    const subValue = (() => {
+      const n = Number(form.subscriptionValue);
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    })();
+
+    if (editingId) {
+      // EDIT existing client — only the form-controlled fields, never touch
+      // per-month state like done / paid / photos / service_notes.
+      const patch = {
+        name: form.name.trim(),
+        address: form.address.trim(),
+        time: form.time || null,
+        day: form.day,
+        week: form.week,
+        contact: form.contact,
+        notes: form.notes,
+        technician: form.technician,
+        scents: cleanScents,
+        service_type: form.serviceType,
+        subscription_value: subValue,
+      };
+      // Optimistic UI
+      setClients((prev) =>
+        prev.map((c) => (c.id === editingId ? { ...c, ...patch } : c)),
+      );
+      const { error } = await supabase
+        .from("scent_clients")
+        .update(patch)
+        .eq("id", editingId);
+      if (error) {
+        alert(error.message);
+        return;
+      }
+      closeForm();
+      return;
+    }
+
+    // NEW client
     const insertRow = {
       name: form.name.trim(),
       address: form.address.trim(),
@@ -296,10 +376,7 @@ export function ScentScheduler({
       completed_at: null,
       paid: false,
       paid_at: null,
-      subscription_value: (() => {
-        const n = Number(form.subscriptionValue);
-        return Number.isFinite(n) && n > 0 ? n : 0;
-      })(),
+      subscription_value: subValue,
       service_notes: "",
       notes_updated_at: null,
       tracking: "",
@@ -851,6 +928,7 @@ export function ScentScheduler({
           </h2>
           <button
             onClick={() => {
+              setEditingId(null);
               setForm((f) => ({ ...f, week: activeWeek }));
               setShowForm(true);
             }}
@@ -1046,13 +1124,24 @@ export function ScentScheduler({
                           </p>
                         )}
                       </div>
-                      <button
-                        onClick={() => deleteClient(c.id)}
-                        className="flex-shrink-0 text-stone-300 hover:text-red-500 transition self-start"
-                        aria-label="Delete"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <div className="flex flex-col gap-2 flex-shrink-0">
+                        <button
+                          onClick={() => openEdit(c)}
+                          className="text-stone-300 hover:text-stone-900 transition"
+                          aria-label="Edit"
+                          title="Edit"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => deleteClient(c.id)}
+                          className="text-stone-300 hover:text-red-500 transition"
+                          aria-label="Delete"
+                          title="Delete"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
                   </article>
                 ))}
@@ -1337,13 +1426,24 @@ export function ScentScheduler({
                           )}
                         </div>
                       </div>
-                      <button
-                        onClick={() => deleteClient(c.id)}
-                        className="flex-shrink-0 text-stone-300 hover:text-red-500 transition self-start"
-                        aria-label="Delete"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <div className="flex flex-col gap-2 flex-shrink-0">
+                        <button
+                          onClick={() => openEdit(c)}
+                          className="text-stone-300 hover:text-stone-900 transition"
+                          aria-label="Edit"
+                          title="Edit"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => deleteClient(c.id)}
+                          className="text-stone-300 hover:text-red-500 transition"
+                          aria-label="Delete"
+                          title="Delete"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
                   </article>
                 ))}
@@ -1357,7 +1457,7 @@ export function ScentScheduler({
       {showForm && (
         <div
           className="fixed inset-0 bg-stone-900/60 backdrop-blur-sm flex items-end md:items-center justify-center z-50 p-0 md:p-6"
-          onClick={() => setShowForm(false)}
+          onClick={closeForm}
         >
           <div
             className="bg-stone-50 w-full max-w-lg max-h-[90vh] overflow-y-auto slide-up"
@@ -1366,12 +1466,14 @@ export function ScentScheduler({
             <div className="bg-stone-900 text-stone-50 px-6 py-4 flex items-center justify-between">
               <div>
                 <p className="mono text-[10px] uppercase tracking-widest text-amber-300">
-                  New Stop
+                  {editingId ? "Edit Stop" : "New Stop"}
                 </p>
-                <h3 className="text-xl font-light italic">Add Client Visit</h3>
+                <h3 className="text-xl font-light italic">
+                  {editingId ? "Update Client Visit" : "Add Client Visit"}
+                </h3>
               </div>
               <button
-                onClick={() => setShowForm(false)}
+                onClick={closeForm}
                 className="hover:text-amber-300"
               >
                 <X className="w-5 h-5" />
@@ -1631,17 +1733,17 @@ export function ScentScheduler({
 
               <div className="flex gap-2 pt-2">
                 <button
-                  onClick={() => setShowForm(false)}
+                  onClick={closeForm}
                   className="flex-1 border border-stone-300 px-4 py-3 mono text-xs uppercase tracking-widest hover:border-stone-900 transition"
                 >
                   Cancel
                 </button>
                 <button
-                  onClick={addClient}
+                  onClick={saveClient}
                   disabled={!form.name.trim() || !form.address.trim()}
                   className="flex-1 bg-stone-900 text-stone-50 px-4 py-3 mono text-xs uppercase tracking-widest hover:bg-amber-300 hover:text-stone-900 transition disabled:opacity-30 disabled:cursor-not-allowed"
                 >
-                  Save Stop
+                  {editingId ? "Save Changes" : "Save Stop"}
                 </button>
               </div>
             </div>

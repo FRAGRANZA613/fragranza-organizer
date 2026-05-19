@@ -25,6 +25,7 @@ import {
   Wrench,
   ArrowLeft,
   DollarSign,
+  CreditCard,
 } from "lucide-react";
 import Link from "next/link";
 import { supabaseBrowser } from "@/lib/supabase/client";
@@ -61,6 +62,7 @@ export interface ScentClient {
   completed_at: string | null;
   paid: boolean;
   paid_at: string | null;
+  subscription_value: number;
   service_notes: string | null;
   notes_updated_at: string | null;
   tracking: string | null;
@@ -190,6 +192,7 @@ export function ScentScheduler({
     technician: string;
     scents: ScentRow[];
     serviceType: ServiceType;
+    subscriptionValue: string;
   }>({
     name: "",
     address: "",
@@ -201,6 +204,7 @@ export function ScentScheduler({
     technician: "Tech 1",
     scents: [{ scent: "", ml: "" }],
     serviceType: "physical",
+    subscriptionValue: "",
   });
 
   // ---------------------- Realtime ----------------------
@@ -292,6 +296,10 @@ export function ScentScheduler({
       completed_at: null,
       paid: false,
       paid_at: null,
+      subscription_value: (() => {
+        const n = Number(form.subscriptionValue);
+        return Number.isFinite(n) && n > 0 ? n : 0;
+      })(),
       service_notes: "",
       notes_updated_at: null,
       tracking: "",
@@ -322,6 +330,7 @@ export function ScentScheduler({
       technician: "Tech 1",
       scents: [{ scent: "", ml: "" }],
       serviceType: "physical",
+      subscriptionValue: "",
     });
     setShowForm(false);
   };
@@ -596,6 +605,16 @@ export function ScentScheduler({
     ? Math.round((doneThisWeek / totalThisWeek) * 100)
     : 0;
 
+  // Subscription revenue rollups
+  const monthlyRevenue = clients.reduce(
+    (sum, c) => sum + Number(c.subscription_value ?? 0),
+    0,
+  );
+  const collectedRevenue = clients
+    .filter((c) => c.paid)
+    .reduce((sum, c) => sum + Number(c.subscription_value ?? 0), 0);
+  const outstandingRevenue = monthlyRevenue - collectedRevenue;
+
   // ---------------------- Render ----------------------
 
   return (
@@ -682,6 +701,22 @@ export function ScentScheduler({
               </p>
             </div>
             <div className="flex items-center gap-6">
+              {monthlyRevenue > 0 && (
+                <div className="text-right hidden sm:block">
+                  <p className="mono text-[10px] uppercase tracking-widest text-stone-400">
+                    Monthly Revenue
+                  </p>
+                  <p className="text-3xl font-bold text-amber-300">
+                    ${collectedRevenue.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                    <span className="text-stone-500 font-light">
+                      /${monthlyRevenue.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                    </span>
+                  </p>
+                  <p className="mono text-[10px] uppercase tracking-widest text-rose-300 mt-1">
+                    ${outstandingRevenue.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })} outstanding
+                  </p>
+                </div>
+              )}
               <div className="text-right">
                 <p className="mono text-[10px] uppercase tracking-widest text-stone-400">
                   This Month
@@ -907,6 +942,12 @@ export function ScentScheduler({
                               <Truck className="w-3 h-3" />
                               Shipping
                             </span>
+                            {Number(c.subscription_value) > 0 && (
+                              <span className="mono text-[10px] uppercase tracking-widest bg-stone-900 text-stone-50 px-2 py-1 flex items-center gap-1">
+                                <CreditCard className="w-3 h-3" />
+                                ${Number(c.subscription_value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/mo
+                              </span>
+                            )}
                             <button
                               type="button"
                               onClick={() => togglePaid(c.id)}
@@ -1089,6 +1130,12 @@ export function ScentScheduler({
                               <Wrench className="w-3 h-3" />
                               {c.technician}
                             </span>
+                            {Number(c.subscription_value) > 0 && (
+                              <span className="mono text-[10px] uppercase tracking-widest bg-stone-900 text-stone-50 px-2 py-1 flex items-center gap-1">
+                                <CreditCard className="w-3 h-3" />
+                                ${Number(c.subscription_value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/mo
+                              </span>
+                            )}
                             <button
                               type="button"
                               onClick={() => togglePaid(c.id)}
@@ -1554,6 +1601,23 @@ export function ScentScheduler({
                   placeholder="(555) 123-4567"
                   className="w-full bg-white border border-stone-300 px-3 py-2.5 focus:outline-none focus:border-stone-900"
                 />
+              </Field>
+              <Field label="Subscription Value (per month)" icon={DollarSign}>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-500">$</span>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    min="0"
+                    step="0.01"
+                    value={form.subscriptionValue}
+                    onChange={(e) =>
+                      setForm({ ...form, subscriptionValue: e.target.value })
+                    }
+                    placeholder="150.00"
+                    className="w-full bg-white border border-stone-300 pl-7 pr-3 py-2.5 focus:outline-none focus:border-stone-900"
+                  />
+                </div>
               </Field>
               <Field label="Notes" icon={FileText}>
                 <textarea

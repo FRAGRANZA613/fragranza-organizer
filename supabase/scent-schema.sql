@@ -44,8 +44,9 @@ create table if not exists public.scent_clients (
 );
 
 -- Additive for installs that ran an earlier version of this script.
-alter table public.scent_clients add column if not exists paid    boolean not null default false;
-alter table public.scent_clients add column if not exists paid_at timestamptz;
+alter table public.scent_clients add column if not exists paid               boolean not null default false;
+alter table public.scent_clients add column if not exists paid_at            timestamptz;
+alter table public.scent_clients add column if not exists subscription_value numeric(12,2) not null default 0;
 
 create index if not exists scent_clients_week_idx on public.scent_clients (week);
 create index if not exists scent_clients_paid_idx on public.scent_clients (paid);

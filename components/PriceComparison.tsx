@@ -7,14 +7,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
+  AlertTriangle,
   ArrowLeft,
   Camera,
   Download,
+  FileDown,
   ImageOff,
   Pencil,
   Plus,
   Search,
   Trash2,
+  Upload,
   X,
 } from "lucide-react";
 import { supabaseBrowser } from "@/lib/supabase/client";
@@ -118,6 +121,105 @@ function compress(file: File): Promise<Blob> {
   });
 }
 
+/* ------------------------------------------------------------ csv import */
+
+type NewRow = {
+  item: string;
+  country: string;
+  our_price: number;
+  competitor: string;
+  competitor_model: string;
+  competitor_price: number;
+  checked_on: string;
+  recorded_by: string;
+};
+
+const CSV_HEADERS = [
+  "item", "country", "our_price", "competitor",
+  "competitor_model", "competitor_price", "checked_on", "recorded_by",
+];
+
+/** Header aliases, so a sheet in Spanish also imports cleanly. */
+const ALIASES: Record<string, string> = {
+  item: "item", articulo: "item", producto: "item", "nuestro item": "item",
+  country: "country", pais: "country",
+  our_price: "our_price", "nuestro precio": "our_price", nuestro_precio: "our_price",
+  competitor: "competitor", competidor: "competitor",
+  competitor_model: "competitor_model", modelo: "competitor_model",
+  "modelo competencia": "competitor_model", modelo_competencia: "competitor_model",
+  competitor_price: "competitor_price", "precio competidor": "competitor_price",
+  precio_competidor: "competitor_price",
+  checked_on: "checked_on", fecha: "checked_on", date: "checked_on",
+  recorded_by: "recorded_by", "registrado por": "recorded_by",
+  registrado_por: "recorded_by", usuario: "recorded_by",
+};
+
+/** RFC-4180-ish parser: quoted fields, escaped quotes, CRLF, `,` or `;`. */
+function parseCsv(input: string): string[][] {
+  const text = input.replace(/^﻿/, "");
+  const firstLine = text.slice(0, text.indexOf("\n") === -1 ? undefined : text.indexOf("\n"));
+  const delim =
+    (firstLine.match(/;/g) || []).length > (firstLine.match(/,/g) || []).length ? ";" : ",";
+
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = "";
+  let quoted = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quoted) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; } else quoted = false;
+      } else field += c;
+    } else if (c === '"') {
+      quoted = true;
+    } else if (c === delim) {
+      row.push(field); field = "";
+    } else if (c === "\n") {
+      row.push(field); rows.push(row); row = []; field = "";
+    } else if (c !== "\r") {
+      field += c;
+    }
+  }
+  if (field !== "" || row.length) { row.push(field); rows.push(row); }
+  return rows.filter((r) => r.some((v) => v.trim() !== ""));
+}
+
+/** Accepts 1.234,56 · 1,234.56 · $120.00 · 120 */
+function parseNum(raw: string): number | null {
+  let s = (raw ?? "").replace(/[^0-9.,-]/g, "").trim();
+  if (!s) return null;
+  const lastComma = s.lastIndexOf(",");
+  const lastDot = s.lastIndexOf(".");
+  if (lastComma > lastDot) s = s.replace(/\./g, "").replace(",", ".");
+  else s = s.replace(/,/g, "");
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Accepts yyyy-mm-dd · dd/mm/yyyy · dd-mm-yyyy */
+function parseDate(raw: string): string | null {
+  const s = (raw ?? "").trim();
+  if (!s) return null;
+
+  let iso: string | null = null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    iso = s;
+  } else {
+    const m = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+    if (m) iso = `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+  }
+  if (!iso) return null;
+
+  // Reject impossible dates like 31-31-2026 or 2026-02-30.
+  const [y, mo, d] = iso.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  const real =
+    dt.getUTCFullYear() === y && dt.getUTCMonth() === mo - 1 && dt.getUTCDate() === d;
+  return real ? iso : null;
+}
+
 /* ------------------------------------------------------------- component */
 
 export function PriceComparison({
@@ -138,6 +240,13 @@ export function PriceComparison({
   const [error, setError] = useState("");
   const [lightbox, setLightbox] = useState<PriceEntry | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const csvRef = useRef<HTMLInputElement>(null);
+  const [csvPreview, setCsvPreview] = useState<{
+    fileName: string;
+    valid: NewRow[];
+    problems: string[];
+  } | null>(null);
+  const [importing, setImporting] = useState(false);
 
   /* ---------------------------------------------------------- data sync */
 
@@ -339,6 +448,111 @@ export function PriceComparison({
 
   /* ----------------------------------------------------------------- csv */
 
+  function download(name: string, body: string, type: string) {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([body], { type }));
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  function downloadTemplate() {
+    const example = [
+      "MILANO", "Panamá", "494.95", "Aromatic",
+      "ARD-003 (100 m²)", "300", today(), currentUser || "Tu nombre",
+    ];
+    download(
+      "plantilla_precios.csv",
+      "﻿" + [CSV_HEADERS, example].map((r) => r.map((c) => `"${c}"`).join(",")).join("\n"),
+      "text/csv",
+    );
+  }
+
+  async function onCsvFile(file: File | undefined) {
+    if (!file) return;
+    try {
+      const rows = parseCsv(await file.text());
+      if (rows.length < 2) throw new Error("El archivo no tiene filas de datos.");
+
+      const header = rows[0].map((h) =>
+        ALIASES[norm(h).replace(/\s+/g, " ")] ?? norm(h).replace(/\s+/g, " "),
+      );
+      const missing = ["item", "country", "competitor", "our_price", "competitor_price"]
+        .filter((c) => !header.includes(c));
+      if (missing.length)
+        throw new Error(`Faltan columnas obligatorias: ${missing.join(", ")}`);
+
+      const col = (r: string[], name: string) => {
+        const i = header.indexOf(name);
+        return i === -1 ? "" : (r[i] ?? "").trim();
+      };
+
+      const valid: NewRow[] = [];
+      const problems: string[] = [];
+
+      rows.slice(1).forEach((r, i) => {
+        const line = i + 2; // 1-based, header is line 1
+        const item = col(r, "item");
+        const country = col(r, "country");
+        const competitor = col(r, "competitor");
+        const ours = parseNum(col(r, "our_price"));
+        const theirs = parseNum(col(r, "competitor_price"));
+        const dateRaw = col(r, "checked_on");
+        const date = dateRaw ? parseDate(dateRaw) : today();
+
+        const missingFields: string[] = [];
+        if (!item) missingFields.push("item");
+        if (!country) missingFields.push("país");
+        if (!competitor) missingFields.push("competidor");
+        if (ours === null) missingFields.push("nuestro precio");
+        if (theirs === null) missingFields.push("precio competidor");
+        if (missingFields.length) {
+          problems.push(`Línea ${line}: falta ${missingFields.join(", ")}`);
+          return;
+        }
+        if (!date) {
+          problems.push(`Línea ${line}: fecha "${dateRaw}" no válida (usa aaaa-mm-dd)`);
+          return;
+        }
+        valid.push({
+          item,
+          country,
+          our_price: ours as number,
+          competitor,
+          competitor_model: col(r, "competitor_model"),
+          competitor_price: theirs as number,
+          checked_on: date,
+          recorded_by: col(r, "recorded_by") || currentUser,
+        });
+      });
+
+      setCsvPreview({ fileName: file.name, valid, problems });
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : "No se pudo leer el CSV");
+    }
+  }
+
+  async function runImport() {
+    if (!csvPreview?.valid.length) return;
+    setImporting(true);
+    try {
+      const chunk = 200;
+      for (let i = 0; i < csvPreview.valid.length; i += chunk) {
+        const { error: err } = await supabase
+          .from("price_entries")
+          .insert(csvPreview.valid.slice(i, i + chunk));
+        if (err) throw err;
+      }
+      await refresh();
+      setCsvPreview(null);
+      setQuery("");
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : "No se pudo importar");
+    } finally {
+      setImporting(false);
+    }
+  }
+
   function exportCsv() {
     const head = [
       "fecha", "item", "pais", "nuestro_precio", "competidor",
@@ -354,11 +568,7 @@ export function PriceComparison({
     const csv = [head, ...rows]
       .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","))
       .join("\n");
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob(["﻿" + csv], { type: "text/csv" }));
-    a.download = `precios_competencia_${today()}.csv`;
-    a.click();
-    URL.revokeObjectURL(a.href);
+    download(`precios_competencia_${today()}.csv`, "﻿" + csv, "text/csv");
   }
 
   /* -------------------------------------------------------------- render */
@@ -377,13 +587,37 @@ export function PriceComparison({
         >
           <ArrowLeft size={16} /> Inicio
         </Link>
-        <div className="ml-auto flex gap-2">
+        <div className="ml-auto flex flex-wrap gap-2">
+          <button
+            onClick={() => csvRef.current?.click()}
+            title="Carga precios en bloque desde un archivo CSV"
+            className="flex items-center gap-1.5 rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-sm hover:bg-neutral-50"
+          >
+            <Upload size={15} /> Importar CSV
+          </button>
           <button
             onClick={exportCsv}
             className="flex items-center gap-1.5 rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-sm hover:bg-neutral-50"
           >
-            <Download size={15} /> CSV
+            <Download size={15} /> Exportar CSV
           </button>
+          <button
+            onClick={downloadTemplate}
+            title="Descarga un CSV de ejemplo con las columnas correctas"
+            className="flex items-center gap-1.5 rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-sm hover:bg-neutral-50"
+          >
+            <FileDown size={15} /> Plantilla
+          </button>
+          <input
+            ref={csvRef}
+            type="file"
+            accept=".csv,text/csv"
+            hidden
+            onChange={(e) => {
+              void onCsvFile(e.target.files?.[0]);
+              e.target.value = "";
+            }}
+          />
         </div>
       </div>
 
@@ -814,6 +1048,107 @@ export function PriceComparison({
                 className="rounded-lg bg-neutral-900 px-4 py-2 text-sm font-semibold text-white hover:bg-neutral-700 disabled:opacity-50"
               >
                 {saving ? "Guardando…" : "Guardar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* csv import preview */}
+      {csvPreview && (
+        <div
+          className="fixed inset-0 z-30 flex items-start justify-center overflow-auto bg-black/45 p-4 sm:p-8"
+          onClick={(e) => e.target === e.currentTarget && setCsvPreview(null)}
+        >
+          <div className="w-full max-w-xl rounded-2xl bg-white p-6">
+            <h3 className="text-lg font-semibold">Importar CSV</h3>
+            <p className="mt-0.5 truncate text-sm text-neutral-500">{csvPreview.fileName}</p>
+
+            <div className="mt-4 flex gap-3">
+              <div className="flex-1 rounded-xl border border-neutral-200 bg-neutral-50 p-3">
+                <div className="text-2xl font-semibold">{csvPreview.valid.length}</div>
+                <div className="text-xs text-neutral-500">filas listas para añadir</div>
+              </div>
+              <div
+                className={`flex-1 rounded-xl border p-3 ${
+                  csvPreview.problems.length
+                    ? "border-amber-200 bg-amber-50"
+                    : "border-neutral-200 bg-neutral-50"
+                }`}
+              >
+                <div className="text-2xl font-semibold">{csvPreview.problems.length}</div>
+                <div className="text-xs text-neutral-500">filas que se omiten</div>
+              </div>
+            </div>
+
+            {csvPreview.problems.length > 0 && (
+              <div className="mt-3 max-h-40 overflow-auto rounded-xl border border-amber-200 bg-amber-50 p-3">
+                <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-amber-800">
+                  <AlertTriangle size={13} /> Estas filas no se importarán
+                </p>
+                <ul className="space-y-0.5 text-xs text-amber-900">
+                  {csvPreview.problems.slice(0, 40).map((p, i) => (
+                    <li key={i}>{p}</li>
+                  ))}
+                  {csvPreview.problems.length > 40 && (
+                    <li>…y {csvPreview.problems.length - 40} más</li>
+                  )}
+                </ul>
+              </div>
+            )}
+
+            {csvPreview.valid.length > 0 && (
+              <div className="mt-3 overflow-x-auto rounded-xl border border-neutral-200">
+                <table className="w-full text-xs">
+                  <thead className="bg-neutral-50 text-neutral-500">
+                    <tr>
+                      <th className="p-2 text-left font-semibold">Item</th>
+                      <th className="p-2 text-left font-semibold">País</th>
+                      <th className="p-2 text-left font-semibold">Competidor</th>
+                      <th className="p-2 text-left font-semibold">Su precio</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {csvPreview.valid.slice(0, 5).map((r, i) => (
+                      <tr key={i} className="border-t border-neutral-100">
+                        <td className="p-2">{r.item}</td>
+                        <td className="p-2">{r.country}</td>
+                        <td className="p-2">
+                          {r.competitor}
+                          {r.competitor_model ? ` — ${r.competitor_model}` : ""}
+                        </td>
+                        <td className="p-2 tabular-nums">{money(r.competitor_price)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {csvPreview.valid.length > 5 && (
+                  <p className="border-t border-neutral-100 p-2 text-xs text-neutral-500">
+                    …y {csvPreview.valid.length - 5} filas más
+                  </p>
+                )}
+              </div>
+            )}
+
+            <p className="mt-3 text-xs text-neutral-500">
+              Se añaden como registros nuevos. No se borra ni se sobrescribe nada de lo que ya hay.
+            </p>
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                onClick={() => setCsvPreview(null)}
+                className="rounded-lg border border-neutral-300 bg-white px-4 py-2 text-sm hover:bg-neutral-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => void runImport()}
+                disabled={importing || csvPreview.valid.length === 0}
+                className="rounded-lg bg-neutral-900 px-4 py-2 text-sm font-semibold text-white hover:bg-neutral-700 disabled:opacity-50"
+              >
+                {importing
+                  ? "Importando…"
+                  : `Importar ${csvPreview.valid.length} filas`}
               </button>
             </div>
           </div>

@@ -501,6 +501,12 @@ export function Organizer({
             >
               Scent Scheduler
             </Link><Link href="/precios" className="px-3 py-2 rounded-lg border border-border hover:bg-gray-50">Precios</Link>
+            <Link
+              href="/ruta"
+              className="px-3 py-2 rounded-lg border border-border hover:bg-gray-50"
+            >
+              Ruta
+            </Link>
             <button
               onClick={() => setShowMembers(true)}
               className="px-3 py-2 rounded-lg border border-border hover:bg-gray-50"

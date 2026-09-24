@@ -273,27 +273,31 @@ export function RefillRoute({
     return `https://www.google.com/maps/dir/?${params.toString()}`;
   }
 
-  async function openRoute() {
-    const url = mapsUrl();
-    if (!url) return;
+  /**
+   * Saves the route in the background. Deliberately NOT awaited by the click
+   * handler: on phones, any `await` before opening Maps breaks the chain of
+   * user activation and the browser blocks the new tab. The link element's own
+   * navigation does the opening, so this only has to record what was opened.
+   */
+  function saveRoute() {
     if (stops.filter((s) => s.address.trim()).length > 10) setNotice(t.tooMany);
 
-    await supabase.from("routes").insert({
-      route_date: new Date().toISOString().slice(0, 10),
-      driver: driverName || currentUser,
-      start_address: startAddress,
-      stops,
-      distance_km: 0,
-      opened_at: new Date().toISOString(),
-      created_by: currentUser,
-    });
+    void (async () => {
+      await supabase.from("routes").insert({
+        route_date: new Date().toISOString().slice(0, 10),
+        driver: driverName || currentUser,
+        start_address: startAddress,
+        stops,
+        distance_km: 0,
+        opened_at: new Date().toISOString(),
+        created_by: currentUser,
+      });
 
-    const { data } = await supabase.from("routes").select("*")
-      .order("route_date", { ascending: false })
-      .order("created_at", { ascending: false }).limit(25);
-    if (data) setRoutes(data as RouteRow[]);
-
-    window.open(url, "_blank", "noopener,noreferrer");
+      const { data } = await supabase.from("routes").select("*")
+        .order("route_date", { ascending: false })
+        .order("created_at", { ascending: false }).limit(25);
+      if (data) setRoutes(data as RouteRow[]);
+    })();
   }
 
   /* ------------------------------------------------------------- mileage */
@@ -369,6 +373,8 @@ export function RefillRoute({
   }, []);
 
   /* -------------------------------------------------------------- render */
+
+  const routeReady = stops.some((s) => s.address.trim() !== "");
 
   const field =
     "w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus:border-neutral-900";
@@ -674,13 +680,26 @@ export function RefillRoute({
           <p className="mb-2 text-center text-xs text-neutral-500">
             {stops.length} {t.added}
           </p>
-          <button
-            onClick={() => void openRoute()}
-            disabled={stops.filter((s) => s.address.trim()).length === 0}
-            className="flex w-full items-center justify-center gap-2 rounded-lg bg-neutral-900 px-4 py-3 text-sm font-semibold text-white hover:bg-neutral-700 disabled:opacity-40"
-          >
-            <Navigation size={16} /> {t.open}
-          </button>
+          {/*
+            A real link, not a button calling window.open(). Phones block
+            windows opened outside the direct handling of a tap, and they hand
+            a plain https://maps link straight to the Google Maps app.
+          */}
+          {routeReady ? (
+            <a
+              href={mapsUrl()}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={saveRoute}
+              className="flex w-full items-center justify-center gap-2 rounded-lg bg-neutral-900 px-4 py-3 text-sm font-semibold text-white hover:bg-neutral-700"
+            >
+              <Navigation size={16} /> {t.open}
+            </a>
+          ) : (
+            <span className="flex w-full cursor-not-allowed items-center justify-center gap-2 rounded-lg bg-neutral-900 px-4 py-3 text-sm font-semibold text-white opacity-40">
+              <Navigation size={16} /> {t.open}
+            </span>
+          )}
         </div>
       </div>
     </main>

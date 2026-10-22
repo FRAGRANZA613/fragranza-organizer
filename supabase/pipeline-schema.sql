@@ -19,6 +19,10 @@ create table if not exists public.deals (
   phone             text not null default '',
   email             text not null default '',
   value_usd         numeric(12,2) not null default 0,
+  -- 'venta' = one-off sale, value_usd is the whole deal.
+  -- 'suscripcion' = recurring fragrance plan, value_usd is per month.
+  deal_type         text not null default 'venta'
+                    check (deal_type in ('venta','suscripcion')),
   client_type       text not null default '',
   products          text not null default '',
   stage             text not null default 'prospecto'
@@ -38,6 +42,15 @@ create table if not exists public.deals (
   created_at        timestamptz not null default now(),
   updated_at        timestamptz not null default now()
 );
+
+-- Additive for installs that ran an earlier version of this script.
+alter table public.deals add column if not exists deal_type text not null default 'venta';
+do $$
+begin
+  alter table public.deals add constraint deals_deal_type_check
+    check (deal_type in ('venta','suscripcion'));
+exception when duplicate_object then null;
+end $$;
 
 create index if not exists deals_stage_idx     on public.deals (stage);
 create index if not exists deals_followup_idx  on public.deals (follow_up_on);

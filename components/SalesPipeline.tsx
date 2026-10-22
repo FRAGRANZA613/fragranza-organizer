@@ -120,6 +120,91 @@ const emptyDeal = (user: string): Partial<Deal> => ({
   lost_reason: "", owner: user,
 });
 
+/* ----------------------------------------------------------- coach prompts */
+
+type CoachKind = "atacar" | "followup" | "objeciones" | "libre";
+
+const COACH_LABEL: Record<CoachKind, string> = {
+  atacar: "Cómo atacar este deal",
+  followup: "Escribir mensaje de follow-up",
+  objeciones: "Manejar objeciones",
+  libre: "Pregunta libre",
+};
+
+const COACH_ASK: Record<CoachKind, string> = {
+  atacar:
+    "Dime cómo mover este deal hacia el cierre. Quiero: (1) una lectura corta y honesta de dónde está " +
+    "realmente el cliente, (2) el next step más concreto que debería dar yo esta semana, y (3) un guion " +
+    "de llamada de no más de un minuto para ese next step. Si crees que este deal está muerto o que " +
+    "estoy perdiendo el tiempo, dímelo claro.",
+  followup:
+    "Escríbeme el mensaje de follow-up para mandarle ahora, listo para copiar y pegar por WhatsApp. " +
+    "Que sea corto, en español de Panamá, cordial pero directo, sin sonar a plantilla ni a vendedor " +
+    "desesperado, y que termine con una pregunta concreta que le obligue a responder algo. " +
+    "Dame también una variante más breve por si prefiero mandar algo de dos líneas.",
+  objeciones:
+    "Dime las tres objeciones más probables que me va a poner este cliente, y cómo responder a cada una. " +
+    "Para cada objeción: qué está diciendo de verdad por debajo, y una respuesta que yo pueda decir en voz " +
+    "alta sin que suene a argumentario. Si hay alguna objeción que no se puede vencer con palabras sino " +
+    "bajando el precio o cambiando la oferta, dímelo en vez de darme una frase bonita.",
+  libre: "",
+};
+
+/** Builds the whole prompt — company context, deal data, notes and the ask. */
+function buildCoachPrompt(
+  kind: CoachKind,
+  d: Deal,
+  dealNotes: DealNote[],
+  question: string,
+): string {
+  const line = (k: string, v: unknown) => {
+    const s = String(v ?? "").trim();
+    return s && s !== "0" ? `- ${k}: ${s}\n` : "";
+  };
+
+  let ctx = "";
+  ctx += line("Contacto", d.contact);
+  ctx += line("Empresa", d.company);
+  ctx += line("Tipo de cliente", d.client_type);
+  ctx += line("Productos / propuesta", d.products);
+  ctx += line("Valor estimado", d.value_usd ? money(d.value_usd) : "");
+  ctx += line("Etapa", STAGE_LABEL[d.stage]);
+  ctx += line("Probabilidad que le doy", `${d.probability}%`);
+  ctx += line("Prioridad", d.priority);
+  ctx += line("Next step que tengo apuntado", d.next_step);
+  ctx += line("Próximo follow-up", d.follow_up_on);
+  ctx += line("Cierre esperado", d.expected_close_on);
+  if (d.stage === "perdido") ctx += line("Motivo de pérdida", d.lost_reason);
+
+  const history = dealNotes
+    .filter((n) => n.deal_id === d.id)
+    .slice(0, 12)
+    .map((n) => `- ${n.created_at.slice(0, 10)}: ${n.body}`)
+    .join("\n");
+
+  const ask = kind === "libre" ? question.trim() : COACH_ASK[kind];
+
+  return [
+    "Actúa como mi coach de ventas. Soy vendedor en Fragranza 613: vendemos difusores de aroma y",
+    "fragancias para espacios comerciales y residenciales (hoteles, oficinas, retail, consultorios,",
+    "residencias) en Panamá. Vendemos el equipo y luego la fragancia de forma recurrente.",
+    "",
+    "Este es un deal que tengo abierto:",
+    "",
+    ctx.trim() || "- (sin datos cargados todavía)",
+    "",
+    history ? "Historial de notas de mis llamadas, de la más reciente a la más vieja:" : "",
+    history || "",
+    history ? "" : "",
+    "Lo que necesito:",
+    ask || "Dame tu lectura de este deal y qué harías tú.",
+    "",
+    "Responde en español, directo y sin relleno. No me felicites ni me resumas lo que ya te dije.",
+  ]
+    .filter((l, i, arr) => !(l === "" && arr[i - 1] === ""))
+    .join("\n");
+}
+
 /* ------------------------------------------------------------- component */
 
 export function SalesPipeline({
@@ -142,9 +227,14 @@ export function SalesPipeline({
 
   const [open, setOpen] = useState<Deal | null>(null);
   const [form, setForm] = useState<Partial<Deal> | null>(null);
-  const [panelTab, setPanelTab] = useState<"detalles" | "notas">("detalles");
+  const [panelTab, setPanelTab] = useState<"detalles" | "notas" | "coach">("detalles");
   const [noteDraft, setNoteDraft] = useState("");
   const [dragId, setDragId] = useState<string | null>(null);
+
+  const [coachKind, setCoachKind] = useState<CoachKind>("atacar");
+  const [coachQuestion, setCoachQuestion] = useState("");
+  const [coachPrompt, setCoachPrompt] = useState("");
+  const [copied, setCopied] = useState(false);
 
   /* ------------------------------------------------------------- refresh */
 
@@ -245,18 +335,24 @@ export function SalesPipeline({
     setBusy(false);
   }
 
+  function resetPanel() {
+    setPanelTab("detalles");
+    setNoteDraft("");
+    setCoachPrompt("");
+    setCoachQuestion("");
+    setCopied(false);
+  }
+
   function openPanel(d: Deal) {
     setOpen(d);
     setForm({ ...d });
-    setPanelTab("detalles");
-    setNoteDraft("");
+    resetPanel();
   }
 
   function openNew() {
     setOpen(null);
     setForm(emptyDeal(currentUser));
-    setPanelTab("detalles");
-    setNoteDraft("");
+    resetPanel();
   }
 
   async function saveForm() {
@@ -297,6 +393,28 @@ export function SalesPipeline({
     await supabase.from("deals").delete().eq("id", d.id);
     setForm(null); setOpen(null);
     await refresh();
+  }
+
+  /* ---------------------------------------------------------------- coach */
+
+  function makePrompt(kind: CoachKind) {
+    if (!open) return;
+    setCoachKind(kind);
+    const text = buildCoachPrompt(kind, open, notes, coachQuestion);
+    setCoachPrompt(text);
+    setCopied(false);
+    void copyPrompt(text);
+  }
+
+  async function copyPrompt(text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2500);
+    } catch {
+      // Clipboard can be blocked; the textarea below is the fallback.
+      setCopied(false);
+    }
   }
 
   async function addNote() {
@@ -520,7 +638,11 @@ export function SalesPipeline({
 
             {open && (
               <div className="mt-3 flex gap-4 border-b border-neutral-200 text-sm">
-                {([["detalles", "Detalles"], ["notas", `Notas (${notes.filter((n) => n.deal_id === open.id).length})`]] as const)
+                {([
+                  ["detalles", "Detalles"],
+                  ["notas", `Notas (${notes.filter((n) => n.deal_id === open.id).length})`],
+                  ["coach", "✦ Coach"],
+                ] as const)
                   .map(([k, t]) => (
                     <button
                       key={k}
@@ -687,6 +809,82 @@ export function SalesPipeline({
                     <li className="text-sm text-neutral-400">Todavía no hay notas.</li>
                   )}
                 </ul>
+              </div>
+            )}
+
+            {open && panelTab === "coach" && (
+              <div className="mt-4">
+                <p className="text-sm text-neutral-600">
+                  Arma la consulta con los datos de este deal y sus notas, y la copia.
+                  Pégala en Claude y te responde con todo el contexto.
+                </p>
+
+                <div className="mt-3 space-y-2">
+                  {(["atacar", "followup", "objeciones"] as const).map((k) => (
+                    <button
+                      key={k}
+                      onClick={() => makePrompt(k)}
+                      className={`w-full rounded-lg border px-3 py-2 text-left text-sm font-semibold hover:bg-neutral-50 ${
+                        coachPrompt && coachKind === k
+                          ? "border-neutral-900 bg-neutral-50"
+                          : "border-neutral-300 bg-white"
+                      }`}
+                    >
+                      {COACH_LABEL[k]}
+                    </button>
+                  ))}
+                </div>
+
+                <label className={`${label} mt-4`}>O pregúntale lo que quieras</label>
+                <div className="flex gap-2">
+                  <input
+                    className={field}
+                    value={coachQuestion}
+                    placeholder="¿Le bajo el precio o aguanto?"
+                    onChange={(e) => setCoachQuestion(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") makePrompt("libre"); }}
+                  />
+                  <button
+                    onClick={() => makePrompt("libre")}
+                    disabled={!coachQuestion.trim()}
+                    className="shrink-0 rounded-lg bg-neutral-900 px-3 py-2 text-sm font-semibold text-white hover:bg-neutral-700 disabled:opacity-40"
+                  >
+                    Armar
+                  </button>
+                </div>
+
+                {coachPrompt && (
+                  <div className="mt-4">
+                    <div className="flex items-center gap-2">
+                      <p className="flex-1 text-xs font-semibold text-neutral-500">
+                        {copied ? "Copiado ✓ — pégalo en Claude" : "Consulta lista"}
+                      </p>
+                      <button
+                        onClick={() => void copyPrompt(coachPrompt)}
+                        className="rounded-lg border border-neutral-300 bg-white px-2.5 py-1 text-xs hover:bg-neutral-50"
+                      >
+                        Copiar
+                      </button>
+                      <a
+                        href="https://claude.ai/new"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="rounded-lg bg-neutral-900 px-2.5 py-1 text-xs font-semibold text-white hover:bg-neutral-700"
+                      >
+                        Abrir Claude
+                      </a>
+                    </div>
+                    <textarea
+                      readOnly
+                      value={coachPrompt}
+                      onFocus={(e) => e.currentTarget.select()}
+                      className={`${field} mt-2 h-64 resize-none font-mono text-[11px] leading-relaxed`}
+                    />
+                    <p className="mt-1 text-xs text-neutral-400">
+                      Si el botón de copiar no funciona, toca el cuadro y se selecciona solo.
+                    </p>
+                  </div>
+                )}
               </div>
             )}
 

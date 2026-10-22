@@ -69,6 +69,22 @@ const STAGE_LABEL: Record<Stage, string> = {
   perdido: "Perdido",
 };
 
+/**
+ * Probability that comes with each stage. Moving a deal — by dragging it or
+ * by picking another stage — resets the number to the one below. It stays an
+ * editable field, so a deal that is unusually safe or unusually shaky can be
+ * corrected by hand afterwards.
+ */
+const STAGE_PROBABILITY: Record<Stage, number> = {
+  prospecto: 10,
+  contactado: 25,
+  cotizacion: 40,
+  negociacion: 60,
+  por_cerrar: 80,
+  ganado: 100,
+  perdido: 0,
+};
+
 const LOST_REASONS = [
   "Precio", "Tiempo / no era el momento", "Se fue con la competencia",
   "Sin respuesta", "No era el cliente adecuado", "Otro",
@@ -115,7 +131,7 @@ function dueLabel(iso: string | null): string | null {
 const emptyDeal = (user: string): Partial<Deal> => ({
   contact: "", company: "", phone: "", email: "",
   value_usd: 0, client_type: "", products: "",
-  stage: "prospecto", probability: 10, priority: "media",
+  stage: "prospecto", probability: STAGE_PROBABILITY.prospecto, priority: "media",
   next_step: "", follow_up_on: null, expected_close_on: null,
   lost_reason: "", owner: user,
 });
@@ -328,7 +344,7 @@ export function SalesPipeline({
       stage,
       lost_reason: stage === "perdido" ? lost_reason : "",
       closed_on: closed ? todayISO() : null,
-      probability: stage === "ganado" ? 100 : stage === "perdido" ? 0 : deal.probability,
+      probability: STAGE_PROBABILITY[stage],
     }).eq("id", deal.id);
     if (error) setNotice(error.message);
     await refresh();
@@ -702,10 +718,19 @@ export function SalesPipeline({
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className={label}>Etapa</label>
-                    <select className={field} value={form.stage ?? "prospecto"}
-                      onChange={(e) => setForm({ ...form, stage: e.target.value as Stage })}>
+                    <select
+                      className={field}
+                      value={form.stage ?? "prospecto"}
+                      onChange={(e) => {
+                        const s = e.target.value as Stage;
+                        // The stage carries its own probability with it.
+                        setForm({ ...form, stage: s, probability: STAGE_PROBABILITY[s] });
+                      }}
+                    >
                       {[...OPEN_STAGES, ...CLOSED_STAGES].map((s) => (
-                        <option key={s} value={s}>{STAGE_LABEL[s]}</option>
+                        <option key={s} value={s}>
+                          {STAGE_LABEL[s]} · {STAGE_PROBABILITY[s]}%
+                        </option>
                       ))}
                     </select>
                   </div>
@@ -714,6 +739,9 @@ export function SalesPipeline({
                     <input className={field} type="number" min="0" max="100"
                       value={form.probability ?? 0}
                       onChange={(e) => setForm({ ...form, probability: Number(e.target.value) })} />
+                    <p className="mt-1 text-[11px] text-neutral-400">
+                      Se ajusta sola al cambiar de etapa. Puedes corregirla a mano.
+                    </p>
                   </div>
                 </div>
 

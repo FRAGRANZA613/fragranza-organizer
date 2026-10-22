@@ -513,6 +513,12 @@ export function Organizer({
             >
               Cajas
             </Link>
+            <Link
+              href="/pipeline"
+              className="px-3 py-2 rounded-lg border border-border hover:bg-gray-50"
+            >
+              Pipeline
+            </Link>
             <button
               onClick={() => setShowMembers(true)}
               className="px-3 py-2 rounded-lg border border-border hover:bg-gray-50"

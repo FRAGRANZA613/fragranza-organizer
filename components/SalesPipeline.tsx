@@ -328,12 +328,19 @@ export function SalesPipeline({
       (s, d) => s + (Number(d.value_usd) * Number(d.probability)) / 100, 0);
     const monthly = subs.reduce((s, d) => s + Number(d.value_usd), 0);
 
-    const closing = deals.filter((d) => d.stage === "por_cerrar").length;
+    const closing = deals.filter((d) => d.stage === "por_cerrar");
+    const tally = (list: Deal[]) => ({
+      count: list.length,
+      amount: list.reduce((s, d) => s + Number(d.value_usd), 0),
+    });
+    const closingSale = tally(closing.filter((d) => d.deal_type !== "suscripcion"));
+    const closingSub = tally(closing.filter((d) => d.deal_type === "suscripcion"));
+
     const calls = openDeals.filter((d) => {
       const n = daysAway(d.follow_up_on);
       return n !== null && n <= 0;
     }).length;
-    return { total, weighted, monthly, closing, calls };
+    return { total, weighted, monthly, closingSale, closingSub, calls };
   }, [openDeals, deals]);
 
   /** Deals with a follow-up due within the next two days, soonest first. */
@@ -551,17 +558,29 @@ export function SalesPipeline({
         </Link>
         <div className="ml-auto flex flex-wrap items-center gap-4">
           {[
-            { n: money(stats.total), l: "pipeline abierto" },
-            { n: money(stats.weighted), l: "ponderado" },
+            { n: money(stats.total), l: "pipeline abierto", sub: "" },
+            { n: money(stats.weighted), l: "ponderado", sub: "" },
             ...(stats.monthly > 0
-              ? [{ n: money(stats.monthly) + "/m", l: "suscripciones" }]
+              ? [{ n: money(stats.monthly) + "/m", l: "suscripciones", sub: "" }]
               : []),
-            { n: String(stats.closing), l: "por cerrar" },
-            { n: String(stats.calls), l: "llamadas hoy" },
+            {
+              n: String(stats.closingSale.count),
+              l: "por cerrar · venta",
+              sub: stats.closingSale.amount > 0 ? money(stats.closingSale.amount) : "",
+            },
+            {
+              n: String(stats.closingSub.count),
+              l: "por cerrar · susc.",
+              sub: stats.closingSub.amount > 0 ? money(stats.closingSub.amount) + "/m" : "",
+            },
+            { n: String(stats.calls), l: "llamadas hoy", sub: "" },
           ].map((s) => (
             <div key={s.l} className="text-right">
               <div className="text-lg font-semibold leading-none tabular-nums">{s.n}</div>
-              <div className="text-[10px] uppercase tracking-wide text-neutral-500">{s.l}</div>
+              <div className="text-[10px] uppercase tracking-wide text-neutral-500">
+                {s.l}
+                {s.sub && <span className="text-neutral-400"> · {s.sub}</span>}
+              </div>
             </div>
           ))}
           <button

@@ -24,6 +24,13 @@ export type Stage =
   | "prospecto" | "contactado" | "cotizacion"
   | "negociacion" | "por_cerrar" | "ganado" | "perdido";
 
+/**
+ * 'venta' is a one-off sale and value_usd is the whole deal.
+ * 'suscripcion' is a recurring fragrance plan and value_usd is per month, so
+ * the two never get added into the same total.
+ */
+export type DealType = "venta" | "suscripcion";
+
 export type Deal = {
   id: string;
   contact: string;
@@ -31,6 +38,7 @@ export type Deal = {
   phone: string;
   email: string;
   value_usd: number;
+  deal_type: DealType;
   client_type: string;
   products: string;
   stage: Stage;
@@ -128,9 +136,18 @@ function dueLabel(iso: string | null): string | null {
   return `${Number(day)} ${months[Number(m) - 1] ?? ""}`.toUpperCase();
 }
 
+const DEAL_TYPE_LABEL: Record<DealType, string> = {
+  venta: "Venta final",
+  suscripcion: "Suscripción",
+};
+
+/** Money as shown for a deal: subscriptions are always per month. */
+const dealMoney = (d: Pick<Deal, "value_usd" | "deal_type">) =>
+  money(d.value_usd) + (d.deal_type === "suscripcion" ? "/mes" : "");
+
 const emptyDeal = (user: string): Partial<Deal> => ({
   contact: "", company: "", phone: "", email: "",
-  value_usd: 0, client_type: "", products: "",
+  value_usd: 0, deal_type: "venta", client_type: "", products: "",
   stage: "prospecto", probability: STAGE_PROBABILITY.prospecto, priority: "media",
   next_step: "", follow_up_on: null, expected_close_on: null,
   lost_reason: "", owner: user,
@@ -183,7 +200,16 @@ function buildCoachPrompt(
   ctx += line("Empresa", d.company);
   ctx += line("Tipo de cliente", d.client_type);
   ctx += line("Productos / propuesta", d.products);
-  ctx += line("Valor estimado", d.value_usd ? money(d.value_usd) : "");
+  ctx += line(
+    "Tipo de deal",
+    d.deal_type === "suscripcion"
+      ? "Suscripción (fragancia recurrente, el valor es mensual)"
+      : "Venta final (una sola vez)",
+  );
+  ctx += line(
+    d.deal_type === "suscripcion" ? "Valor mensual" : "Valor estimado",
+    d.value_usd ? money(d.value_usd) : "",
+  );
   ctx += line("Etapa", STAGE_LABEL[d.stage]);
   ctx += line("Probabilidad que le doy", `${d.probability}%`);
   ctx += line("Prioridad", d.priority);
@@ -292,15 +318,22 @@ export function SalesPipeline({
   );
 
   const stats = useMemo(() => {
-    const total = openDeals.reduce((s, d) => s + Number(d.value_usd), 0);
-    const weighted = openDeals.reduce(
+    // One-off sales and monthly subscriptions are counted apart: adding a
+    // $5,000 sale to a $200/month plan would give a number that means nothing.
+    const sales = openDeals.filter((d) => d.deal_type !== "suscripcion");
+    const subs = openDeals.filter((d) => d.deal_type === "suscripcion");
+
+    const total = sales.reduce((s, d) => s + Number(d.value_usd), 0);
+    const weighted = sales.reduce(
       (s, d) => s + (Number(d.value_usd) * Number(d.probability)) / 100, 0);
+    const monthly = subs.reduce((s, d) => s + Number(d.value_usd), 0);
+
     const closing = deals.filter((d) => d.stage === "por_cerrar").length;
     const calls = openDeals.filter((d) => {
       const n = daysAway(d.follow_up_on);
       return n !== null && n <= 0;
     }).length;
-    return { total, weighted, closing, calls };
+    return { total, weighted, monthly, closing, calls };
   }, [openDeals, deals]);
 
   /** Deals with a follow-up due within the next two days, soonest first. */
@@ -385,6 +418,7 @@ export function SalesPipeline({
       phone: String(form.phone ?? "").trim(),
       email: String(form.email ?? "").trim(),
       value_usd: Number(form.value_usd) || 0,
+      deal_type: (form.deal_type ?? "venta") as DealType,
       client_type: String(form.client_type ?? "").trim(),
       products: String(form.products ?? "").trim(),
       stage: (form.stage ?? "prospecto") as Stage,
@@ -478,8 +512,13 @@ export function SalesPipeline({
               {due}
             </span>
           )}
+          {d.deal_type === "suscripcion" && (
+            <span className="rounded bg-sky-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-sky-700">
+              suscripción
+            </span>
+          )}
           {Number(d.value_usd) > 0 && (
-            <span className="ml-auto text-xs font-semibold tabular-nums">{money(d.value_usd)}</span>
+            <span className="ml-auto text-xs font-semibold tabular-nums">{dealMoney(d)}</span>
           )}
         </div>
 
@@ -514,6 +553,9 @@ export function SalesPipeline({
           {[
             { n: money(stats.total), l: "pipeline abierto" },
             { n: money(stats.weighted), l: "ponderado" },
+            ...(stats.monthly > 0
+              ? [{ n: money(stats.monthly) + "/m", l: "suscripciones" }]
+              : []),
             { n: String(stats.closing), l: "por cerrar" },
             { n: String(stats.calls), l: "llamadas hoy" },
           ].map((s) => (
@@ -599,7 +641,12 @@ export function SalesPipeline({
       <div className="mt-4 flex gap-3 overflow-x-auto pb-4">
         {stagesShown.map((s) => {
           const items = byStage(s);
-          const sum = items.reduce((t, d) => t + Number(d.value_usd), 0);
+          const sum = items
+            .filter((d) => d.deal_type !== "suscripcion")
+            .reduce((t, d) => t + Number(d.value_usd), 0);
+          const subSum = items
+            .filter((d) => d.deal_type === "suscripcion")
+            .reduce((t, d) => t + Number(d.value_usd), 0);
           return (
             <div
               key={s}
@@ -620,7 +667,13 @@ export function SalesPipeline({
                   {STAGE_LABEL[s]}
                 </h2>
                 <span className="rounded bg-white px-1.5 text-xs text-neutral-600">{items.length}</span>
-                {sum > 0 && <span className="ml-auto text-xs text-neutral-500">{money(sum)}</span>}
+                {(sum > 0 || subSum > 0) && (
+                  <span className="ml-auto text-xs text-neutral-500">
+                    {sum > 0 && money(sum)}
+                    {sum > 0 && subSum > 0 && " · "}
+                    {subSum > 0 && `${money(subSum)}/m`}
+                  </span>
+                )}
               </div>
 
               <div className="space-y-2">
@@ -697,7 +750,9 @@ export function SalesPipeline({
                       onChange={(e) => setForm({ ...form, email: e.target.value })} />
                   </div>
                   <div>
-                    <label className={label}>Valor estimado (USD)</label>
+                    <label className={label}>
+                      {form.deal_type === "suscripcion" ? "Valor mensual (USD)" : "Valor estimado (USD)"}
+                    </label>
                     <input className={field} type="number" min="0" value={form.value_usd ?? 0}
                       onChange={(e) => setForm({ ...form, value_usd: Number(e.target.value) })} />
                   </div>
@@ -707,6 +762,30 @@ export function SalesPipeline({
                       placeholder="Hotel, oficina, retail…"
                       onChange={(e) => setForm({ ...form, client_type: e.target.value })} />
                   </div>
+                </div>
+
+                <div>
+                  <label className={label}>Tipo de deal</label>
+                  <div className="flex overflow-hidden rounded-lg border border-neutral-300">
+                    {(["venta", "suscripcion"] as const).map((t) => (
+                      <button
+                        key={t}
+                        onClick={() => setForm({ ...form, deal_type: t })}
+                        className={`flex-1 px-3 py-2 text-sm font-semibold ${
+                          (form.deal_type ?? "venta") === t
+                            ? "bg-neutral-900 text-white"
+                            : "bg-white hover:bg-neutral-100"
+                        }`}
+                      >
+                        {DEAL_TYPE_LABEL[t]}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="mt-1 text-[11px] text-neutral-400">
+                    {form.deal_type === "suscripcion"
+                      ? "El valor se cuenta por mes y va aparte del pipeline de venta."
+                      : "Venta de una sola vez: equipo, pedido puntual."}
+                  </p>
                 </div>
 
                 <div>

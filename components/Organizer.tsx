@@ -5,7 +5,6 @@
 // but persists everything through Supabase and syncs live across teammates.
 
 import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { LogoSvg } from "@/components/LogoSvg";
 
@@ -154,6 +153,14 @@ export function Organizer({
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [showMembers, setShowMembers] = useState(false);
+
+  // The team modal is opened from the drawer in AppMenu, which lives
+  // outside this component.
+  useEffect(() => {
+    const onTeam = () => setShowMembers(true);
+    window.addEventListener("fragranza:team", onTeam);
+    return () => window.removeEventListener("fragranza:team", onTeam);
+  }, []);
 
   // Form state
   const [fTitle, setFTitle] = useState("");
@@ -485,61 +492,7 @@ export function Organizer({
   // ---------------------- Render ----------------------
   return (
     <div className="min-h-screen bg-bg">
-      {/* Header */}
-      <header className="bg-white border-b border-border">
-        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3 text-ink">
-            <LogoSvg className="h-9 w-auto" />
-            <span className="text-xs uppercase tracking-widest text-gray-400">
-              Organizer
-            </span>
-          </div>
-          <div className="flex items-center gap-2 text-sm">
-            <Link
-              href="/scents"
-              className="px-3 py-2 rounded-lg border border-border hover:bg-gray-50"
-            >
-              Scent Scheduler
-            </Link><Link href="/precios" className="px-3 py-2 rounded-lg border border-border hover:bg-gray-50">Precios</Link>
-            <Link
-              href="/ruta"
-              className="px-3 py-2 rounded-lg border border-border hover:bg-gray-50"
-            >
-              Ruta
-            </Link>
-            <Link
-              href="/cajas"
-              className="px-3 py-2 rounded-lg border border-border hover:bg-gray-50"
-            >
-              Cajas
-            </Link>
-            <Link
-              href="/pipeline"
-              className="px-3 py-2 rounded-lg border border-border hover:bg-gray-50"
-            >
-              Pipeline
-            </Link>
-            <button
-              onClick={() => setShowMembers(true)}
-              className="px-3 py-2 rounded-lg border border-border hover:bg-gray-50"
-            >
-              Team
-            </button>
-            <span className="hidden sm:inline text-gray-500 px-2">
-              {currentUser.email}
-            </span>
-            <form action="/auth/signout" method="post">
-              <button
-                type="submit"
-                className="px-3 py-2 rounded-lg border border-border hover:bg-gray-50"
-              >
-                Sign out
-              </button>
-            </form>
-          </div>
-        </div>
-      </header>
-
+      
       <main className="max-w-6xl mx-auto px-6 py-8">
         {/* Stat strip */}
         <section className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">

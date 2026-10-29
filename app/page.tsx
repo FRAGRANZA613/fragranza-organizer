@@ -21,7 +21,7 @@ export default async function Home() {
       .order("due", { ascending: true, nullsFirst: false }),
     supabase
       .from("profiles")
-      .select("id, email, display_name")
+      .select("id, email, display_name, active, is_admin")
       .order("email", { ascending: true }),
     supabase
       .from("invoices")

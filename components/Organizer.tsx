@@ -31,6 +31,10 @@ export interface Member {
   id: string;
   email: string;
   display_name: string | null;
+  /** false = le quitamos el acceso; sigue apareciendo en el historial. */
+  active: boolean;
+  /** Puede quitar y devolver accesos. */
+  is_admin: boolean;
 }
 
 export interface Invoice {
@@ -178,6 +182,40 @@ export function Organizer({
   const [inviteName, setInviteName] = useState("");
   const [inviteStatus, setInviteStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [inviteMsg, setInviteMsg] = useState("");
+
+  // ---------------------- Acceso del equipo ----------------------
+  const isAdmin =
+    members.find((m) => m.id === currentUser.id)?.is_admin === true;
+  const [accessBusy, setAccessBusy] = useState<string | null>(null);
+  const [accessMsg, setAccessMsg] = useState("");
+
+  async function setAccess(m: Member, active: boolean) {
+    const verb = active ? "devolver el acceso a" : "quitar el acceso a";
+    if (!window.confirm(`¿Seguro que quieres ${verb} ${m.email}?`)) return;
+    setAccessBusy(m.id);
+    setAccessMsg("");
+    try {
+      const res = await fetch("/api/team/access", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: m.id, active }),
+      });
+      const payload = await res.json();
+      if (!res.ok) throw new Error(payload?.error ?? "No se pudo guardar");
+      setMembers((prev) =>
+        prev.map((p) => (p.id === m.id ? { ...p, active } : p))
+      );
+      setAccessMsg(
+        active
+          ? `${m.email} vuelve a tener acceso.`
+          : `${m.email} ya no puede entrar.`
+      );
+    } catch (err) {
+      setAccessMsg(err instanceof Error ? err.message : "No se pudo guardar");
+    } finally {
+      setAccessBusy(null);
+    }
+  }
 
   // ---------------------- Realtime subscription ----------------------
   useEffect(() => {
@@ -1486,20 +1524,47 @@ export function Organizer({
                   {members.map((m) => (
                     <li
                       key={m.id}
-                      className="px-3 py-2 flex items-center justify-between text-sm"
+                      className="px-3 py-2 flex items-center justify-between gap-3 text-sm"
                     >
-                      <div>
-                        <div className="text-ink font-medium">{memberLabel(m)}</div>
+                      <div className="min-w-0">
+                        <div className="text-ink font-medium truncate">
+                          {memberLabel(m)}
+                          {m.active === false && (
+                            <span className="ml-2 rounded bg-gray-100 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-gray-500">
+                              sin acceso
+                            </span>
+                          )}
+                        </div>
                         {m.display_name && (
-                          <div className="text-xs text-gray-500">{m.email}</div>
+                          <div className="text-xs text-gray-500 truncate">{m.email}</div>
                         )}
                       </div>
-                      {m.id === currentUser.id && (
+                      {m.id === currentUser.id ? (
                         <span className="text-xs text-gray-400">you</span>
-                      )}
+                      ) : isAdmin ? (
+                        <button
+                          type="button"
+                          disabled={accessBusy === m.id}
+                          onClick={() => setAccess(m, m.active === false)}
+                          className={`shrink-0 rounded-lg border px-2 py-1 text-xs font-medium disabled:opacity-60 ${
+                            m.active === false
+                              ? "border-border text-gray-600 hover:bg-gray-50"
+                              : "border-red-200 text-red-600 hover:bg-red-50"
+                          }`}
+                        >
+                          {accessBusy === m.id
+                            ? "…"
+                            : m.active === false
+                              ? "Dar acceso"
+                              : "Quitar acceso"}
+                        </button>
+                      ) : null}
                     </li>
                   ))}
                 </ul>
+                {accessMsg && (
+                  <p className="mt-2 text-xs text-gray-600">{accessMsg}</p>
+                )}
               </div>
             </div>
           </div>

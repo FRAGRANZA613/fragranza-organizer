@@ -13,6 +13,13 @@ export const dynamic = "force-dynamic";
 /** 100 anos. GoTrue quiere una duracion, no una fecha. */
 const FOREVER = "876000h";
 
+/** Que un mensaje de error nunca devuelva la llave secreta al navegador. */
+function redact(message: string) {
+  return message
+    .replace(/sb_secret_[\w\-\s]+/g, "sb_secret_***")
+    .replace(/eyJ[\w.\-\s]+/g, "***");
+}
+
 export async function POST(request: Request) {
   let body: { userId?: string; active?: boolean };
   try {
@@ -55,7 +62,8 @@ export async function POST(request: Request) {
     );
   }
 
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  // Un salto de linea pegado por accidente rompe la cabecera Authorization.
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.replace(/\s+/g, "");
   if (!serviceKey) {
     return NextResponse.json(
       { error: "Falta la variable SUPABASE_SERVICE_ROLE_KEY en Vercel" },
@@ -73,7 +81,7 @@ export async function POST(request: Request) {
     ban_duration: active ? "none" : FOREVER,
   });
   if (banError) {
-    return NextResponse.json({ error: banError.message }, { status: 500 });
+    return NextResponse.json({ error: redact(banError.message) }, { status: 500 });
   }
 
   const { error: profileError } = await admin

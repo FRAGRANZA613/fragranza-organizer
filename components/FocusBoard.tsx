@@ -15,6 +15,7 @@ import {
   ChevronUp,
   Pencil,
   Plus,
+  Search,
   Star,
   Trash2,
   Zap,
@@ -164,6 +165,9 @@ export function FocusBoard({ initialItems, currentUser }: Props) {
 
   // alta rápida
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [filterCat, setFilterCat] = useState<string>("all");
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
   const [draft, setDraft] = useState("");
   const [draftNote, setDraftNote] = useState("");
@@ -231,7 +235,25 @@ export function FocusBoard({ initialItems, currentUser }: Props) {
     [items]
   );
 
-  const visibleRest = showAll ? rest : rest.slice(0, 12);
+  /** Cuántos quedan en cada categoría, para los chips del filtro. */
+  const counts = useMemo(() => {
+    const m: Record<string, number> = {};
+    rest.forEach((i) => {
+      m[i.category] = (m[i.category] ?? 0) + 1;
+    });
+    return m;
+  }, [rest]);
+
+  const filtered = useMemo(() => {
+    const q = norm(query.trim());
+    return rest.filter((i) => {
+      if (filterCat !== "all" && i.category !== filterCat) return false;
+      if (!q) return true;
+      return norm(`${i.title} ${i.notes ?? ""}`).includes(q);
+    });
+  }, [rest, query, filterCat]);
+
+  const visibleRest = showAll ? filtered : filtered.slice(0, 12);
 
   /* ----------------------------------------------------- acciones */
 
@@ -498,12 +520,57 @@ export function FocusBoard({ initialItems, currentUser }: Props) {
       {/* --------------------------------------------- todo lo demás */}
       <section className="mt-5">
         <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
-          Lo demás, por importancia ({rest.length})
+          Lo demás, por importancia ({filtered.length}
+          {filtered.length !== rest.length && ` de ${rest.length}`})
         </h2>
 
-        {rest.length === 0 ? (
+        {/* buscador */}
+        <div className="relative mb-2">
+          <Search
+            size={15}
+            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+          />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Buscar por cliente, CUST, cotización o detalle…"
+            className="w-full rounded-lg border border-border bg-white py-2 pl-9 pr-3 text-sm"
+          />
+        </div>
+
+        {/* filtro por categoría, con lo que queda en cada una */}
+        <div className="mb-2 flex flex-wrap gap-1.5">
+          <button
+            onClick={() => setFilterCat("all")}
+            className={`rounded-full border px-2.5 py-1 text-xs ${
+              filterCat === "all"
+                ? "border-ink bg-ink text-white"
+                : "border-border bg-white text-gray-600 hover:bg-gray-50"
+            }`}
+          >
+            Todos {rest.length}
+          </button>
+          {CATEGORIES.filter((c) => counts[c.key]).map((c) => (
+            <button
+              key={c.key}
+              onClick={() => setFilterCat(filterCat === c.key ? "all" : c.key)}
+              title={c.label}
+              className={`rounded-full border px-2.5 py-1 text-xs ${
+                filterCat === c.key
+                  ? "border-ink bg-ink text-white"
+                  : "border-border bg-white text-gray-600 hover:bg-gray-50"
+              }`}
+            >
+              {c.emoji} {counts[c.key]}
+            </button>
+          ))}
+        </div>
+
+        {filtered.length === 0 ? (
           <p className="rounded-xl border border-border bg-white p-4 text-sm text-gray-500">
-            No queda nada más. Buen día.
+            {rest.length === 0
+              ? "No queda nada más. Buen día."
+              : "Nada con ese filtro."}
           </p>
         ) : (
           <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-white">
@@ -546,7 +613,19 @@ export function FocusBoard({ initialItems, currentUser }: Props) {
                     <DueChip iso={it.due} />
                   </div>
                   {it.notes && (
-                    <p className="mt-1 whitespace-pre-line text-xs text-gray-600">{it.notes}</p>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setExpanded((prev) => ({ ...prev, [it.id]: !prev[it.id] }))
+                      }
+                      className="mt-1 block w-full text-left text-xs text-gray-600"
+                    >
+                      {expanded[it.id] ? (
+                        <span className="whitespace-pre-line">{it.notes}</span>
+                      ) : (
+                        <span className="block truncate">{firstLine(it.notes)}</span>
+                      )}
+                    </button>
                   )}
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
@@ -577,7 +656,7 @@ export function FocusBoard({ initialItems, currentUser }: Props) {
           </ul>
         )}
 
-        {rest.length > 12 && (
+        {filtered.length > 12 && (
           <button
             onClick={() => setShowAll((v) => !v)}
             className="mt-2 flex w-full items-center justify-center gap-1 rounded-lg border border-border bg-white py-2 text-xs font-medium text-gray-600 hover:bg-gray-50"
@@ -588,7 +667,7 @@ export function FocusBoard({ initialItems, currentUser }: Props) {
               </>
             ) : (
               <>
-                <ChevronDown size={14} /> Ver los {rest.length - 12} restantes
+                <ChevronDown size={14} /> Ver los {filtered.length - 12} restantes
               </>
             )}
           </button>
@@ -603,6 +682,17 @@ export function FocusBoard({ initialItems, currentUser }: Props) {
 }
 
 /* ------------------------------------------------------- auxiliares */
+
+/** Minúsculas y sin acentos, para que "cotizacion" encuentre "cotización". */
+function norm(s: string) {
+  return s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+/** La primera línea del detalle; el resto se ve al tocarlo. */
+function firstLine(s: string) {
+  const lines = s.split("\n");
+  return lines.length > 1 ? `${lines[0]} …` : lines[0];
+}
 
 function DueChip({ iso }: { iso: string | null }) {
   const label = dueLabel(iso);

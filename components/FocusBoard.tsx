@@ -13,8 +13,10 @@ import {
   Check,
   ChevronDown,
   ChevronUp,
+  Pencil,
   Plus,
   Star,
+  Trash2,
   Zap,
 } from "lucide-react";
 
@@ -161,7 +163,11 @@ export function FocusBoard({ initialItems, currentUser }: Props) {
   const [busy, setBusy] = useState<string | null>(null);
 
   // alta rápida
+  const [editingId, setEditingId] = useState<string | null>(null);
+
   const [draft, setDraft] = useState("");
+  const [draftNote, setDraftNote] = useState("");
+  const [draftDue, setDraftDue] = useState("");
   const [draftCat, setDraftCat] = useState("cerrar");
   const [draftUrgent, setDraftUrgent] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -239,6 +245,16 @@ export function FocusBoard({ initialItems, currentUser }: Props) {
     setBusy(null);
   }
 
+  async function remove(it: FocusItem) {
+    if (!window.confirm(`¿Borrar "${it.title}"? Esto no se puede deshacer.`)) return;
+    setBusy(it.id);
+    setItems((prev) => prev.filter((i) => i.id !== it.id));
+    const { error } = await supabase.from("items").delete().eq("id", it.id);
+    if (error) window.alert(`No se pudo borrar: ${error.message}`);
+    setEditingId(null);
+    setBusy(null);
+  }
+
   function toggleToday(it: FocusItem) {
     if (it.focus_on === today()) {
       void patch(it.id, { focus_on: null });
@@ -275,6 +291,8 @@ export function FocusBoard({ initialItems, currentUser }: Props) {
       type: "todo",
       priority: draftUrgent ? "high" : "medium",
       status: "not-started",
+      notes: draftNote.trim() || null,
+      due: draftDue ? new Date(draftDue).toISOString() : null,
       category: draftCat,
       urgent: draftUrgent,
       assignee: currentUser.id,
@@ -287,6 +305,8 @@ export function FocusBoard({ initialItems, currentUser }: Props) {
         prev.some((i) => i.id === data.id) ? prev : [...prev, data as FocusItem]
       );
       setDraft("");
+      setDraftNote("");
+      setDraftDue("");
       setDraftUrgent(false);
     }
     setAdding(false);
@@ -333,6 +353,19 @@ export function FocusBoard({ initialItems, currentUser }: Props) {
                 key={it.id}
                 className="flex items-start gap-3 rounded-xl bg-white p-3 shadow-sm"
               >
+                {editingId === it.id ? (
+                  <EditPanel
+                    item={it}
+                    busy={busy === it.id}
+                    onCancel={() => setEditingId(null)}
+                    onDelete={() => void remove(it)}
+                    onSave={(changes) => {
+                      void patch(it.id, changes);
+                      setEditingId(null);
+                    }}
+                  />
+                ) : (
+                  <>
                 <button
                   onClick={() => void patch(it.id, { status: "done" })}
                   disabled={busy === it.id}
@@ -375,7 +408,16 @@ export function FocusBoard({ initialItems, currentUser }: Props) {
                   >
                     <ArrowRight size={15} />
                   </button>
+                  <button
+                    onClick={() => setEditingId(it.id)}
+                    title="Editar"
+                    className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-ink"
+                  >
+                    <Pencil size={15} />
+                  </button>
                 </div>
+                  </>
+                )}
               </li>
             ))}
           </ol>
@@ -408,6 +450,22 @@ export function FocusBoard({ initialItems, currentUser }: Props) {
             <Plus size={15} /> Agregar
           </button>
         </div>
+        <textarea
+          value={draftNote}
+          onChange={(e) => setDraftNote(e.target.value)}
+          rows={2}
+          placeholder="Detalle: de qué se trata, qué cotización, qué le vas a decir…"
+          className="mt-2 w-full rounded-lg border border-border px-3 py-2 text-sm"
+        />
+        <label className="mt-2 flex items-center gap-2 text-xs text-gray-500">
+          Para cuándo
+          <input
+            type="datetime-local"
+            value={draftDue}
+            onChange={(e) => setDraftDue(e.target.value)}
+            className="rounded-lg border border-border px-2 py-1.5 text-xs text-ink"
+          />
+        </label>
         <div className="mt-2 flex flex-wrap gap-1.5">
           {CATEGORIES.map((c) => (
             <button
@@ -451,6 +509,19 @@ export function FocusBoard({ initialItems, currentUser }: Props) {
           <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-white">
             {visibleRest.map((it) => (
               <li key={it.id} className="flex items-start gap-3 px-3 py-2.5">
+                {editingId === it.id ? (
+                  <EditPanel
+                    item={it}
+                    busy={busy === it.id}
+                    onCancel={() => setEditingId(null)}
+                    onDelete={() => void remove(it)}
+                    onSave={(changes) => {
+                      void patch(it.id, changes);
+                      setEditingId(null);
+                    }}
+                  />
+                ) : (
+                  <>
                 <button
                   onClick={() => toggleToday(it)}
                   disabled={busy === it.id}
@@ -491,7 +562,16 @@ export function FocusBoard({ initialItems, currentUser }: Props) {
                   >
                     <Check size={15} />
                   </button>
+                  <button
+                    onClick={() => setEditingId(it.id)}
+                    title="Editar"
+                    className="rounded-lg p-1.5 text-gray-300 hover:bg-gray-100 hover:text-ink"
+                  >
+                    <Pencil size={15} />
+                  </button>
                 </div>
+                  </>
+                )}
               </li>
             ))}
           </ul>
@@ -554,5 +634,124 @@ function CategoryPicker({
         </option>
       ))}
     </select>
+  );
+}
+
+/** ISO → valor de un <input type="datetime-local">, en hora local. */
+function toLocalInput(iso: string | null) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(
+    d.getHours()
+  )}:${p(d.getMinutes())}`;
+}
+
+/**
+ * Editor en línea de un pendiente: título, detalle, fecha, categoría,
+ * urgencia y borrar. Se abre con el lápiz y ocupa toda la fila.
+ */
+function EditPanel({
+  item,
+  busy,
+  onSave,
+  onDelete,
+  onCancel,
+}: {
+  item: FocusItem;
+  busy: boolean;
+  onSave: (changes: Partial<FocusItem>) => void;
+  onDelete: () => void;
+  onCancel: () => void;
+}) {
+  const [title, setTitle] = useState(item.title);
+  const [notes, setNotes] = useState(item.notes ?? "");
+  const [due, setDue] = useState(toLocalInput(item.due));
+  const [category, setCategory] = useState(item.category);
+  const [urgent, setUrgent] = useState(item.urgent);
+
+  function save() {
+    onSave({
+      title: title.trim() || item.title,
+      notes: notes.trim() || null,
+      due: due ? new Date(due).toISOString() : null,
+      category,
+      urgent,
+      priority: urgent ? "high" : "medium",
+    });
+  }
+
+  return (
+    <div className="w-full space-y-2">
+      <input
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        placeholder="Título"
+        className="w-full rounded-lg border border-border px-3 py-2 text-sm font-medium"
+      />
+      <textarea
+        value={notes}
+        onChange={(e) => setNotes(e.target.value)}
+        rows={4}
+        placeholder="Detalle: de qué se trata, qué cotización, qué le vas a decir…"
+        className="w-full rounded-lg border border-border px-3 py-2 text-sm"
+      />
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          type="datetime-local"
+          value={due}
+          onChange={(e) => setDue(e.target.value)}
+          className="rounded-lg border border-border px-2 py-1.5 text-xs"
+        />
+        <select
+          value={category}
+          onChange={(e) => setCategory(e.target.value)}
+          className="rounded-lg border border-border px-2 py-1.5 text-xs"
+        >
+          {CATEGORIES.map((c) => (
+            <option key={c.key} value={c.key}>
+              {c.emoji} {c.label}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          onClick={() => setUrgent((v) => !v)}
+          className={`rounded-full border px-2.5 py-1 text-xs ${
+            urgent
+              ? "border-red-500 bg-red-500 text-white"
+              : "border-border text-gray-600 hover:bg-gray-50"
+          }`}
+        >
+          🚨 Urgente
+        </button>
+      </div>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={save}
+          disabled={busy}
+          className="rounded-lg bg-ink px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+        >
+          Guardar
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="rounded-lg border border-border px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50"
+        >
+          Cancelar
+        </button>
+        <button
+          type="button"
+          onClick={onDelete}
+          disabled={busy}
+          className="ml-auto flex items-center gap-1 rounded-lg border border-red-200 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50 disabled:opacity-50"
+        >
+          <Trash2 size={13} /> Borrar
+        </button>
+      </div>
+    </div>
   );
 }

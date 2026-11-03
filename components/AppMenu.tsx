@@ -11,6 +11,7 @@ import {
   Boxes,
   CalendarClock,
   Home,
+  ListChecks,
   LogOut,
   Menu,
   Navigation,
@@ -29,6 +30,7 @@ type Section = {
 
 const SECTIONS: Section[] = [
   { href: "/", label: "Inicio", icon: Home },
+  { href: "/enfoque", label: "Enfoque", icon: ListChecks },
   { href: "/scents", label: "Scent Scheduler", icon: CalendarClock },
   { href: "/precios", label: "Precios", icon: Tag },
   { href: "/ruta", label: "Ruta", icon: Navigation },

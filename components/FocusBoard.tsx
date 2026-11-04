@@ -100,6 +100,25 @@ function dueLabel(iso: string | null) {
   return { text: `en ${days} días`, late: false };
 }
 
+/**
+ * Un pendiente elegido para hoy. Si lo elegiste ayer y no lo terminaste,
+ * sigue contando: se arrastra en vez de desaparecer al cambiar el día.
+ */
+function isChosen(it: FocusItem) {
+  return !!it.focus_on && it.focus_on <= today();
+}
+
+/** Venció antes de hoy. */
+function isOverdue(it: FocusItem) {
+  if (!it.due) return false;
+  const d = new Date(it.due);
+  if (Number.isNaN(d.getTime())) return false;
+  const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+    d.getDate()
+  ).padStart(2, "0")}`;
+  return day < today();
+}
+
 /* ------------------------------------------------- regla de prioridad */
 
 /** Menor = más importante. Urgente manda; luego la categoría; luego la fecha. */
@@ -217,7 +236,7 @@ export function FocusBoard({ initialItems, currentUser }: Props) {
   const todays = useMemo(
     () =>
       pending
-        .filter((i) => i.focus_on === today())
+        .filter(isChosen)
         .sort((a, b) => score(a) - score(b)),
     [pending]
   );
@@ -225,7 +244,7 @@ export function FocusBoard({ initialItems, currentUser }: Props) {
   const rest = useMemo(
     () =>
       pending
-        .filter((i) => i.focus_on !== today())
+        .filter((i) => !isChosen(i))
         .sort((a, b) => score(a) - score(b)),
     [pending]
   );
@@ -244,10 +263,16 @@ export function FocusBoard({ initialItems, currentUser }: Props) {
     return m;
   }, [rest]);
 
+  const overdueCount = useMemo(() => rest.filter(isOverdue).length, [rest]);
+
   const filtered = useMemo(() => {
     const q = norm(query.trim());
     return rest.filter((i) => {
-      if (filterCat !== "all" && i.category !== filterCat) return false;
+      if (filterCat === "overdue") {
+        if (!isOverdue(i)) return false;
+      } else if (filterCat !== "all" && i.category !== filterCat) {
+        return false;
+      }
       if (!q) return true;
       return norm(`${i.title} ${i.notes ?? ""}`).includes(q);
     });
@@ -278,7 +303,7 @@ export function FocusBoard({ initialItems, currentUser }: Props) {
   }
 
   function toggleToday(it: FocusItem) {
-    if (it.focus_on === today()) {
+    if (isChosen(it)) {
       void patch(it.id, { focus_on: null });
       return;
     }
@@ -407,6 +432,11 @@ export function FocusBoard({ initialItems, currentUser }: Props) {
                       {cat(it.category).emoji} {cat(it.category).label}
                     </span>
                     <DueChip iso={it.due} />
+                    {it.focus_on && it.focus_on < today() && (
+                      <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-700">
+                        viene de antes
+                      </span>
+                    )}
                   </div>
                   {it.notes && (
                     <p className="mt-1 whitespace-pre-line text-xs text-gray-600">{it.notes}</p>
@@ -550,6 +580,21 @@ export function FocusBoard({ initialItems, currentUser }: Props) {
           >
             Todos {rest.length}
           </button>
+          {overdueCount > 0 && (
+            <button
+              onClick={() =>
+                setFilterCat(filterCat === "overdue" ? "all" : "overdue")
+              }
+              title="Lo que ya venció"
+              className={`rounded-full border px-2.5 py-1 text-xs font-medium ${
+                filterCat === "overdue"
+                  ? "border-red-600 bg-red-600 text-white"
+                  : "border-red-200 bg-white text-red-600 hover:bg-red-50"
+              }`}
+            >
+              ⏰ Atrasados {overdueCount}
+            </button>
+          )}
           {CATEGORIES.filter((c) => counts[c.key]).map((c) => (
             <button
               key={c.key}
@@ -594,7 +639,7 @@ export function FocusBoard({ initialItems, currentUser }: Props) {
                   disabled={busy === it.id}
                   title="Subir a mis 3 de hoy"
                   className={`mt-0.5 shrink-0 rounded-lg p-1 ${
-                    it.focus_on === today()
+                    isChosen(it)
                       ? "text-amber-500"
                       : "text-gray-300 hover:text-amber-500"
                   }`}

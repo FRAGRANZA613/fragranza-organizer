@@ -36,6 +36,23 @@ export interface FocusItem {
   focus_on: string | null;
   /** El deal del que nació este pendiente, si vino del Pipeline. */
   deal_id: string | null;
+  /** Cómo se hace: llamada, email, whatsapp, en persona u otro. */
+  action_type: string;
+}
+
+type Action = { key: string; label: string; emoji: string };
+
+/** Cómo se ejecuta el pendiente. Saber esto de antemano evita el arranque. */
+const ACTIONS: Action[] = [
+  { key: "llamada", label: "Llamada", emoji: "📞" },
+  { key: "email", label: "Email", emoji: "✉️" },
+  { key: "whatsapp", label: "WhatsApp", emoji: "💬" },
+  { key: "fisico", label: "En persona", emoji: "🚗" },
+  { key: "otro", label: "Otro", emoji: "•" },
+];
+
+function action(key: string): Action {
+  return ACTIONS.find((a) => a.key === key) ?? ACTIONS[ACTIONS.length - 1];
 }
 
 export interface FocusDeal {
@@ -221,6 +238,7 @@ export function FocusBoard({ initialItems, initialDeals, currentUser }: Props) {
   const [draft, setDraft] = useState("");
   const [draftNote, setDraftNote] = useState("");
   const [draftDue, setDraftDue] = useState("");
+  const [draftAction, setDraftAction] = useState("llamada");
   const [draftCat, setDraftCat] = useState("cerrar");
   const [draftUrgent, setDraftUrgent] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -408,6 +426,7 @@ export function FocusBoard({ initialItems, initialDeals, currentUser }: Props) {
       status: "not-started",
       notes: draftNote.trim() || null,
       due: draftDue ? new Date(draftDue).toISOString() : null,
+      action_type: draftAction,
       category: draftCat,
       urgent: draftUrgent,
       assignee: currentUser.id,
@@ -422,6 +441,7 @@ export function FocusBoard({ initialItems, initialDeals, currentUser }: Props) {
       setDraft("");
       setDraftNote("");
       setDraftDue("");
+      setDraftAction("llamada");
       setDraftUrgent(false);
     }
     setAdding(false);
@@ -493,6 +513,9 @@ export function FocusBoard({ initialItems, initialDeals, currentUser }: Props) {
                   <div className="text-sm font-semibold text-ink">
                     <span className="mr-1 text-gray-400">{i + 1}.</span>
                     {it.urgent && <span className="mr-1">🚨</span>}
+                    <span className="mr-1" title={action(it.action_type).label}>
+                      {action(it.action_type).emoji}
+                    </span>
                     {it.title}
                   </div>
                   <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-gray-500">
@@ -587,6 +610,22 @@ export function FocusBoard({ initialItems, initialDeals, currentUser }: Props) {
             className="rounded-lg border border-border px-2 py-1.5 text-xs text-ink"
           />
         </label>
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {ACTIONS.map((a) => (
+            <button
+              key={a.key}
+              type="button"
+              onClick={() => setDraftAction(a.key)}
+              className={`rounded-full border px-2.5 py-1 text-xs ${
+                draftAction === a.key
+                  ? "border-sky-600 bg-sky-600 text-white"
+                  : "border-border text-gray-600 hover:bg-gray-50"
+              }`}
+            >
+              {a.emoji} {a.label}
+            </button>
+          ))}
+        </div>
         <div className="mt-2 flex flex-wrap gap-1.5">
           {CATEGORIES.map((c) => (
             <button
@@ -718,6 +757,9 @@ export function FocusBoard({ initialItems, initialDeals, currentUser }: Props) {
                 <div className="min-w-0 flex-1">
                   <div className="text-sm text-ink">
                     {it.urgent && <span className="mr-1">🚨</span>}
+                    <span className="mr-1" title={action(it.action_type).label}>
+                      {action(it.action_type).emoji}
+                    </span>
                     {it.title}
                   </div>
                   <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-gray-500">
@@ -895,6 +937,7 @@ function EditPanel({
   const [notes, setNotes] = useState(item.notes ?? "");
   const [due, setDue] = useState(toLocalInput(item.due));
   const [category, setCategory] = useState(item.category);
+  const [actionType, setActionType] = useState(item.action_type);
   const [urgent, setUrgent] = useState(item.urgent);
 
   function save() {
@@ -902,6 +945,7 @@ function EditPanel({
       title: title.trim() || item.title,
       notes: notes.trim() || null,
       due: due ? new Date(due).toISOString() : null,
+      action_type: actionType,
       category,
       urgent,
       priority: urgent ? "high" : "medium",
@@ -930,6 +974,18 @@ function EditPanel({
           onChange={(e) => setDue(e.target.value)}
           className="rounded-lg border border-border px-2 py-1.5 text-xs"
         />
+        <select
+          value={actionType}
+          onChange={(e) => setActionType(e.target.value)}
+          title="Cómo se hace"
+          className="rounded-lg border border-border px-2 py-1.5 text-xs"
+        >
+          {ACTIONS.map((a) => (
+            <option key={a.key} value={a.key}>
+              {a.emoji} {a.label}
+            </option>
+          ))}
+        </select>
         <select
           value={category}
           onChange={(e) => setCategory(e.target.value)}

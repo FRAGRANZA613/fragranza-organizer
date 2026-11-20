@@ -276,6 +276,12 @@ export function SalesPipeline({
   const [coachKind, setCoachKind] = useState<CoachKind>("atacar");
   const [coachQuestion, setCoachQuestion] = useState("");
   const [coachPrompt, setCoachPrompt] = useState("");
+
+  // Pendiente creado desde el deal: nace ligado, para no escribirlo dos veces.
+  const [taskDraft, setTaskDraft] = useState("");
+  const [taskDue, setTaskDue] = useState("");
+  const [taskBusy, setTaskBusy] = useState(false);
+  const [taskMsg, setTaskMsg] = useState("");
   const [copied, setCopied] = useState(false);
 
   /* ------------------------------------------------------------- refresh */
@@ -453,6 +459,32 @@ export function SalesPipeline({
   }
 
   /* ---------------------------------------------------------------- coach */
+
+  /** Crea en Enfoque un pendiente ya ligado a este deal. */
+  async function createTask() {
+    if (!open) return;
+    const title = taskDraft.trim();
+    if (!title) return;
+    setTaskBusy(true);
+    const { error } = await supabase.from("items").insert({
+      title,
+      type: "todo",
+      priority: "medium",
+      status: "not-started",
+      category: "cerrar",
+      due: taskDue ? new Date(taskDue).toISOString() : null,
+      deal_id: open.id,
+    });
+    setTaskBusy(false);
+    if (error) {
+      window.alert(`No se pudo crear el pendiente: ${error.message}`);
+      return;
+    }
+    setTaskDraft("");
+    setTaskDue("");
+    setTaskMsg("Listo, ya está en Enfoque");
+    window.setTimeout(() => setTaskMsg(""), 4000);
+  }
 
   function makePrompt(kind: CoachKind) {
     if (!open) return;
@@ -723,6 +755,45 @@ export function SalesPipeline({
                 <X size={18} />
               </button>
             </div>
+
+            {open && (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void createTask();
+                }}
+                className="mt-3 rounded-xl border border-neutral-200 bg-neutral-50 p-3"
+              >
+                <div className="flex gap-2">
+                  <input
+                    value={taskDraft}
+                    onChange={(e) => setTaskDraft(e.target.value)}
+                    placeholder="¿Qué hay que hacer con este cliente?"
+                    className="min-w-0 flex-1 rounded-lg border border-neutral-200 px-3 py-2 text-sm"
+                  />
+                  <button
+                    type="submit"
+                    disabled={taskBusy || !taskDraft.trim()}
+                    className="shrink-0 rounded-lg bg-neutral-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                  >
+                    + Pendiente
+                  </button>
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-neutral-500">
+                  Para cuándo
+                  <input
+                    type="datetime-local"
+                    value={taskDue}
+                    onChange={(e) => setTaskDue(e.target.value)}
+                    className="rounded-lg border border-neutral-200 px-2 py-1 text-xs text-neutral-900"
+                  />
+                  {taskMsg && <span className="font-medium text-emerald-700">{taskMsg}</span>}
+                </div>
+                <p className="mt-1 text-[11px] text-neutral-400">
+                  Aparece en Enfoque con el monto y la etapa de este deal.
+                </p>
+              </form>
+            )}
 
             {open && (
               <div className="mt-3 flex gap-4 border-b border-neutral-200 text-sm">

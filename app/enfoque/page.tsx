@@ -18,7 +18,7 @@ export default async function EnfoquePage() {
     supabase
       .from("items")
       .select(
-        "id, title, type, priority, status, due, notes, assignee, created_by, category, urgent, focus_on, deal_id"
+        "id, title, type, priority, status, due, notes, assignee, created_by, category, urgent, focus_on, deal_id, action_type"
       )
       .order("due", { ascending: true, nullsFirst: false }),
     supabase.from("deals").select("id, contact, company, value_usd, stage, deal_type"),

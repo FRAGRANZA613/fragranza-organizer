@@ -34,10 +34,33 @@ export interface FocusItem {
   category: string;
   urgent: boolean;
   focus_on: string | null;
+  /** El deal del que nació este pendiente, si vino del Pipeline. */
+  deal_id: string | null;
 }
+
+export interface FocusDeal {
+  id: string;
+  contact: string;
+  company: string;
+  value_usd: number;
+  stage: string;
+  deal_type: string;
+}
+
+/** Nombre corto de la etapa, como se ve en el Pipeline. */
+const STAGE_LABEL: Record<string, string> = {
+  prospecto: "prospecto",
+  contactado: "contactado",
+  cotizacion: "cotización",
+  negociacion: "negociación",
+  por_cerrar: "por cerrar",
+  ganado: "ganado",
+  perdido: "perdido",
+};
 
 interface Props {
   initialItems: FocusItem[];
+  initialDeals: FocusDeal[];
   currentUser: { id: string; email: string };
 }
 
@@ -175,10 +198,17 @@ function dailyAlarmUrl() {
 
 /* ================================================================== */
 
-export function FocusBoard({ initialItems, currentUser }: Props) {
+export function FocusBoard({ initialItems, initialDeals, currentUser }: Props) {
   const supabase = supabaseBrowser();
 
   const [items, setItems] = useState<FocusItem[]>(initialItems);
+  const [deals, setDeals] = useState<FocusDeal[]>(initialDeals);
+
+  const dealById = useMemo(() => {
+    const m = new Map<string, FocusDeal>();
+    deals.forEach((d) => m.set(d.id, d));
+    return m;
+  }, [deals]);
   const [showAll, setShowAll] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -290,6 +320,44 @@ export function FocusBoard({ initialItems, currentUser }: Props) {
     const { error } = await supabase.from("items").update(changes).eq("id", id);
     if (error) window.alert(`No se pudo guardar: ${error.message}`);
     setBusy(null);
+  }
+
+  /**
+   * Marcar hecho. Si el pendiente venía de un deal que sigue abierto,
+   * ofrece cerrarlo ahí mismo para no tener que entrar al Pipeline.
+   */
+  async function complete(it: FocusItem) {
+    await patch(it.id, { status: "done" });
+
+    const deal = it.deal_id ? dealById.get(it.deal_id) : undefined;
+    if (!deal || deal.stage === "ganado" || deal.stage === "perdido") return;
+
+    const money = deal.value_usd
+      ? ` de $${deal.value_usd.toLocaleString("en-US")}`
+      : "";
+    if (
+      !window.confirm(
+        `¿Movemos ${deal.company || deal.contact}${money} a Ganado en el Pipeline?`
+      )
+    )
+      return;
+
+    const { error } = await supabase
+      .from("deals")
+      .update({
+        stage: "ganado",
+        probability: 100,
+        closed_on: today(),
+      })
+      .eq("id", deal.id);
+
+    if (error) {
+      window.alert(`No se pudo mover el deal: ${error.message}`);
+      return;
+    }
+    setDeals((prev) =>
+      prev.map((d) => (d.id === deal.id ? { ...d, stage: "ganado" } : d))
+    );
   }
 
   async function remove(it: FocusItem) {
@@ -414,7 +482,7 @@ export function FocusBoard({ initialItems, currentUser }: Props) {
                 ) : (
                   <>
                 <button
-                  onClick={() => void patch(it.id, { status: "done" })}
+                  onClick={() => void complete(it)}
                   disabled={busy === it.id}
                   title="Marcar como hecho"
                   className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-2 border-gray-300 text-gray-400 hover:border-emerald-500 hover:text-emerald-600"
@@ -432,6 +500,7 @@ export function FocusBoard({ initialItems, currentUser }: Props) {
                       {cat(it.category).emoji} {cat(it.category).label}
                     </span>
                     <DueChip iso={it.due} />
+                    <DealChip deal={it.deal_id ? dealById.get(it.deal_id) : undefined} />
                     {it.focus_on && it.focus_on < today() && (
                       <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-700">
                         viene de antes
@@ -656,6 +725,7 @@ export function FocusBoard({ initialItems, currentUser }: Props) {
                       {cat(it.category).emoji} {cat(it.category).label}
                     </span>
                     <DueChip iso={it.due} />
+                    <DealChip deal={it.deal_id ? dealById.get(it.deal_id) : undefined} />
                   </div>
                   {it.notes && (
                     <button
@@ -679,7 +749,7 @@ export function FocusBoard({ initialItems, currentUser }: Props) {
                     onChange={(key) => void patch(it.id, { category: key })}
                   />
                   <button
-                    onClick={() => void patch(it.id, { status: "done" })}
+                    onClick={() => void complete(it)}
                     disabled={busy === it.id}
                     title="Marcar como hecho"
                     className="rounded-lg p-1.5 text-gray-300 hover:bg-gray-100 hover:text-emerald-600"
@@ -746,6 +816,27 @@ function DueChip({ iso }: { iso: string | null }) {
     <span className={label.late ? "font-medium text-red-600" : "text-gray-500"}>
       {label.text}
     </span>
+  );
+}
+
+/** Lo que vale el pendiente, heredado del deal. Lleva al Pipeline. */
+function DealChip({ deal }: { deal?: FocusDeal }) {
+  if (!deal) return null;
+  const money = deal.value_usd
+    ? `$${deal.value_usd.toLocaleString("en-US")}${
+        deal.deal_type === "suscripcion" ? "/mes" : ""
+      }`
+    : null;
+  return (
+    <a
+      href="/pipeline"
+      title="Ver en el Pipeline"
+      className="inline-flex items-center gap-1 rounded bg-emerald-50 px-1.5 py-0.5 text-[11px] font-medium text-emerald-800 hover:bg-emerald-100"
+    >
+      💰 {deal.company || deal.contact}
+      {money && <span>· {money}</span>}
+      <span className="text-emerald-600">· {STAGE_LABEL[deal.stage] ?? deal.stage}</span>
+    </a>
   );
 }
 
